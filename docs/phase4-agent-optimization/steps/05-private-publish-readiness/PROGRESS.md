@@ -1,6 +1,6 @@
 # Step 05 进度
 
-- 状态：`PRIVATE_REPOSITORY_CREATED`
+- 状态：`PRIVATE_PUBLISHED`
 - 日期：2026-08-08
 - 默认模型：`deepseek-v4-flash`
 - GitHub可见性：私有
@@ -21,7 +21,7 @@
 - [x] Ruff通过；
 - [x] Git候选文件Secret扫描；
 - [x] 创建私有GitHub仓库；
-- [ ] 完成本机GitHub认证并推送首个提交。
+- [x] 使用仓库专用SSH Deploy Key完成认证并推送首个提交。
 
 ## 发布边界
 
