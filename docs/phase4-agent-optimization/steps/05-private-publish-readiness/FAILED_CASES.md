@@ -33,3 +33,14 @@
 - 原因：并发Gate使用`api_key`模式，离线CI测试预期`local`模式；
 - 修正：完整回归显式设置`IDENTITY_MODE=local`；
 - 复验：177/177通过。
+
+## GitHub Actions缺少持久化测试依赖
+
+- 表现：`offline-ci`在`Unit tests without external services or model API`步骤失败；
+- 远程输出：177项测试中1项错误、23项跳过，错误用例为
+  `test_encrypted_serializer_round_trip_and_wrong_key_failure`；
+- 原因：工作流仅安装`.[dev]`，加密检查点序列化测试实际依赖`persistence` extra中的
+  `pycryptodome`；
+- 修正：离线CI安装范围改为`.[dev,persistence]`；
+- 边界：仍不启动PostgreSQL、模型API、行情网络、Spark或RAG重型依赖；
+- 目标：保留完整177项离线单元测试入口，并由环境开关继续跳过需要真实外部服务的用例。
