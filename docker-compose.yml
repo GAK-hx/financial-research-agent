@@ -1,0 +1,381 @@
+name: financial-research-agent
+
+services:
+  postgres:
+    image: postgres:17.10-alpine3.23
+    environment:
+      POSTGRES_DB: "${POSTGRES_DB:-financial_agent}"
+      POSTGRES_USER: "${POSTGRES_USER:-agent}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-agent-local}"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-agent} -d ${POSTGRES_DB:-financial_agent}",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    restart: unless-stopped
+    networks: [agent-net]
+
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
+    command: >-
+      etcd --advertise-client-urls=http://etcd:2379
+      --listen-client-urls=http://0.0.0.0:2379
+      --data-dir=/etcd
+    volumes:
+      - etcd_data:/etcd
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+    restart: unless-stopped
+    networks: [agent-net]
+
+  milvus:
+    image: milvusdb/milvus:v2.4.0
+    depends_on: [etcd]
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      COMMON_STORAGETYPE: local
+    command: milvus run standalone
+    volumes:
+      - milvus_data:/var/lib/milvus
+    ports:
+      - "${MILVUS_HOST_PORT:-19531}:19530"
+    deploy:
+      resources:
+        limits:
+          memory: 1800m
+    restart: unless-stopped
+    networks: [agent-net]
+
+  app:
+    build:
+      context: .
+      args:
+        INSTALL_PROFILE: rag
+        INSTALL_HARNESS: "true"
+        INSTALL_PERSISTENCE: "true"
+    env_file: .env
+    environment:
+      AGENT_FRAMEWORK: langchain
+      ORCHESTRATION_RUNTIME: langgraph
+      CHECKPOINT_BACKEND: postgres
+      CHECKPOINT_DATABASE_URL: "postgresql://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD:-agent-local}@postgres:5432/${POSTGRES_DB:-financial_agent}?sslmode=disable"
+      BUSINESS_DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD:-agent-local}@postgres:5432/${POSTGRES_DB:-financial_agent}"
+      CHECKPOINT_ENCRYPTION_ENABLED: "${CHECKPOINT_ENCRYPTION_ENABLED:-false}"
+      CHECKPOINT_AES_KEY: "${CHECKPOINT_AES_KEY:-}"
+      LANGGRAPH_STRICT_MSGPACK: "true"
+      IDENTITY_MODE: "${IDENTITY_MODE:-local}"
+      AGENT_API_KEY: "${AGENT_API_KEY:-}"
+      PROVIDER_SHARED_RATE_LIMIT_ENABLED: "true"
+    depends_on:
+      milvus:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    volumes:
+      - lake_data:/lake
+      - model_cache:/root/.cache/huggingface
+      - ./artifacts:/artifacts
+      - ${REPORTS_HOST_DIR:-./data/reports}:/data/reports:ro
+    deploy:
+      resources:
+        limits:
+          memory: 1000m
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+    networks: [agent-net]
+
+  data-bootstrap:
+    profiles: ["ingestion"]
+    build: .
+    env_file: .env
+    command: ["python", "-m", "financial_research_agent.data_management.bootstrap"]
+    volumes:
+      - lake_data:/lake
+    deploy:
+      resources:
+        limits:
+          memory: 384m
+    restart: "no"
+    networks: [agent-net]
+
+  market-ingest:
+    profiles: ["ingestion"]
+    build:
+      context: .
+      args:
+        INSTALL_PROFILE: ingestion
+    env_file: .env
+    command: ["python", "-m", "financial_research_agent.market.cli"]
+    volumes:
+      - lake_data:/lake
+    deploy:
+      resources:
+        limits:
+          memory: 768m
+    restart: "no"
+    networks: [agent-net]
+
+  financial-ingest:
+    profiles: ["ingestion"]
+    build:
+      context: .
+      args:
+        INSTALL_PROFILE: ingestion
+    env_file: .env
+    command: ["python", "-m", "financial_research_agent.financial.cli"]
+    volumes:
+      - lake_data:/lake
+    deploy:
+      resources:
+        limits:
+          memory: 900m
+    restart: "no"
+    networks: [agent-net]
+
+  factor-batch:
+    profiles: ["analysis"]
+    build:
+      context: .
+      args:
+        INSTALL_PROFILE: analysis
+    env_file: .env
+    environment:
+      SPARK_LOCAL_IP: 127.0.0.1
+    command:
+      ["python", "-m", "financial_research_agent.analysis.cli", "--universe", "${ANALYSIS_UNIVERSE_ID:-demo_liquid_a_share}"]
+    volumes:
+      - lake_data:/lake
+      - ./artifacts:/artifacts
+    deploy:
+      resources:
+        limits:
+          memory: 1600m
+    restart: "no"
+    networks: [agent-net]
+
+  langgraph-spike:
+    profiles: ["harness"]
+    build:
+      context: .
+      args:
+        INSTALL_PROFILE: core
+        INSTALL_HARNESS: "true"
+    env_file: .env
+    command: ["python", "-m", "unittest", "tests.test_langgraph_spike", "-v"]
+    volumes:
+      - lake_data:/lake
+      - ./artifacts:/artifacts
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    restart: "no"
+    networks: [agent-net]
+
+  job-api:
+    profiles: ["harness"]
+    build:
+      context: .
+      args:
+        INSTALL_PROFILE: rag
+        INSTALL_HARNESS: "true"
+        INSTALL_PERSISTENCE: "true"
+    env_file: .env
+    environment:
+      AGENT_FRAMEWORK: langchain
+      ORCHESTRATION_RUNTIME: langgraph
+      CHECKPOINT_BACKEND: postgres
+      CHECKPOINT_DATABASE_URL: "postgresql://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD:-agent-local}@postgres:5432/${POSTGRES_DB:-financial_agent}?sslmode=disable"
+      BUSINESS_DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD:-agent-local}@postgres:5432/${POSTGRES_DB:-financial_agent}"
+      CHECKPOINT_ENCRYPTION_ENABLED: "${CHECKPOINT_ENCRYPTION_ENABLED:-false}"
+      CHECKPOINT_AES_KEY: "${CHECKPOINT_AES_KEY:-}"
+      LANGGRAPH_STRICT_MSGPACK: "true"
+      ANALYZE_VIA_JOBS: "true"
+      IDENTITY_MODE: "${IDENTITY_MODE:-local}"
+      AGENT_API_KEY: "${AGENT_API_KEY:-}"
+    depends_on:
+      milvus:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
+    ports:
+      - "${JOB_API_PORT:-8002}:8000"
+    volumes:
+      - lake_data:/lake
+      - model_cache:/root/.cache/huggingface
+      - ./artifacts:/artifacts
+      - ${REPORTS_HOST_DIR:-./data/reports}:/data/reports:ro
+    deploy:
+      resources:
+        limits:
+          memory: 700m
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+    networks: [agent-net]
+
+  job-worker:
+    profiles: ["harness"]
+    build:
+      context: .
+      args:
+        INSTALL_PROFILE: rag
+        INSTALL_HARNESS: "true"
+        INSTALL_PERSISTENCE: "true"
+    env_file: .env
+    environment:
+      AGENT_FRAMEWORK: langchain
+      ORCHESTRATION_RUNTIME: langgraph
+      CHECKPOINT_BACKEND: postgres
+      CHECKPOINT_DATABASE_URL: "postgresql://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD:-agent-local}@postgres:5432/${POSTGRES_DB:-financial_agent}?sslmode=disable"
+      BUSINESS_DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD:-agent-local}@postgres:5432/${POSTGRES_DB:-financial_agent}"
+      JOB_WORKER_ID: worker-1
+      CHECKPOINT_ENCRYPTION_ENABLED: "${CHECKPOINT_ENCRYPTION_ENABLED:-false}"
+      CHECKPOINT_AES_KEY: "${CHECKPOINT_AES_KEY:-}"
+      LANGGRAPH_STRICT_MSGPACK: "true"
+      PROVIDER_SHARED_RATE_LIMIT_ENABLED: "true"
+    command:
+      ["python", "-m", "financial_research_agent.jobs.worker"]
+    depends_on:
+      milvus:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
+    volumes:
+      - lake_data:/lake
+      - model_cache:/root/.cache/huggingface
+      - ./artifacts:/artifacts
+      - ${REPORTS_HOST_DIR:-./data/reports}:/data/reports:ro
+    deploy:
+      resources:
+        limits:
+          memory: 1200m
+    stop_grace_period: 270s
+    restart: unless-stopped
+    networks: [agent-net]
+
+  job-worker-2:
+    profiles: ["workers"]
+    extends: job-worker
+    environment:
+      AGENT_FRAMEWORK: langchain
+      ORCHESTRATION_RUNTIME: langgraph
+      CHECKPOINT_BACKEND: postgres
+      CHECKPOINT_DATABASE_URL: "postgresql://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD:-agent-local}@postgres:5432/${POSTGRES_DB:-financial_agent}?sslmode=disable"
+      BUSINESS_DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD:-agent-local}@postgres:5432/${POSTGRES_DB:-financial_agent}"
+      JOB_WORKER_ID: worker-2
+      CHECKPOINT_ENCRYPTION_ENABLED: "${CHECKPOINT_ENCRYPTION_ENABLED:-false}"
+      CHECKPOINT_AES_KEY: "${CHECKPOINT_AES_KEY:-}"
+      LANGGRAPH_STRICT_MSGPACK: "true"
+
+  db-migrate:
+    build:
+      context: .
+      args:
+        INSTALL_PROFILE: core
+        INSTALL_PERSISTENCE: "true"
+    env_file: .env
+    environment:
+      BUSINESS_DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD:-agent-local}@postgres:5432/${POSTGRES_DB:-financial_agent}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["alembic", "upgrade", "head"]
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+    restart: "no"
+    networks: [agent-net]
+
+  rag-index:
+    profiles: ["rag"]
+    build:
+      context: .
+      args:
+        INSTALL_PROFILE: rag
+    env_file: .env
+    depends_on: [milvus]
+    command: ["python", "-m", "financial_research_agent.rag.indexer", "--mode", "incremental"]
+    volumes:
+      - lake_data:/lake
+      - model_cache:/root/.cache/huggingface
+      - ./artifacts:/artifacts
+      - ${REPORTS_HOST_DIR:-./data/reports}:/data/reports:ro
+    deploy:
+      resources:
+        limits:
+          memory: 1800m
+    restart: "no"
+    networks: [agent-net]
+
+  knowledge-ingest:
+    profiles: ["knowledge"]
+    build:
+      context: .
+      args:
+        INSTALL_PROFILE: core
+        INSTALL_PERSISTENCE: "true"
+    env_file: .env
+    environment:
+      BUSINESS_DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD:-agent-local}@postgres:5432/${POSTGRES_DB:-financial_agent}"
+    command:
+      ["python", "-m", "financial_research_agent.knowledge.cli", "--limit", "${KNOWLEDGE_BATCH_LIMIT:-100}"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
+    volumes:
+      - lake_data:/lake
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    restart: "no"
+    networks: [agent-net]
+
+volumes:
+  postgres_data:
+  etcd_data:
+  milvus_data:
+  lake_data:
+  model_cache:
+
+networks:
+  agent-net:
+    driver: bridge

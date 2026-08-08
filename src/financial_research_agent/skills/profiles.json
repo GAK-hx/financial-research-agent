@@ -1,0 +1,7 @@
+{
+  "profiles": [
+    {"id":"standard","max_claims":12,"section_order":["summary","claims","risk_vector","scenarios","limitations"],"instructions":["平衡展示结论、风险和限制。"]},
+    {"id":"concise","max_claims":6,"section_order":["summary","claims","risks","limitations"],"instructions":["减少篇幅但不降低Evidence引用要求。"]},
+    {"id":"risk","max_claims":10,"section_order":["risk_vector","risks","limitations","claims"],"instructions":["优先展示证据缺口、数据置信度和下行情景。"]}
+  ]
+}

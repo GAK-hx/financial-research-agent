@@ -1,0 +1,32 @@
+{
+  "events": [
+    {
+      "source_record_id": "demo-600519-2026-05-02-001",
+      "symbol": "600519",
+      "event_type": "company_update",
+      "title": "贵州茅台渠道改革演示事件",
+      "content": "本记录仅用于验证事件知识流水线、来源追踪和检索，不代表实时新闻或投资结论。",
+      "source_url": "https://example.invalid/financial-agent/demo-600519-001",
+      "event_time": "2026-05-02T09:00:00+08:00",
+      "published_at": "2026-05-02T09:30:00+08:00",
+      "available_at": "2026-05-02T09:35:00+08:00",
+      "entity_evidence": ["正文明确包含股票代码600519和公司名称贵州茅台"],
+      "raw_version": "v1",
+      "metadata": {"fixture": true, "realtime": false}
+    },
+    {
+      "source_record_id": "demo-300750-2026-04-22-001",
+      "symbol": "300750",
+      "event_type": "technology_update",
+      "title": "宁德时代技术发布演示事件",
+      "content": "本记录是可分发的本地演示数据，用于验证多来源事件结构、时间字段和证据引用。",
+      "source_url": "https://example.invalid/financial-agent/demo-300750-001",
+      "event_time": "2026-04-22T10:00:00+08:00",
+      "published_at": "2026-04-22T10:20:00+08:00",
+      "available_at": "2026-04-22T10:25:00+08:00",
+      "entity_evidence": ["正文明确包含股票代码300750和公司名称宁德时代"],
+      "raw_version": "v1",
+      "metadata": {"fixture": true, "realtime": false}
+    }
+  ]
+}

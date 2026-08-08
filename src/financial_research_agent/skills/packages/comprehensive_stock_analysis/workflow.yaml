@@ -1,0 +1,1 @@
+{"steps":["parallel_domain_tools","evidence_sufficiency","optional_bounded_replan","report","validate"],"replan_limit":1,"guardrails":["same_entities","same_dates","same_intent","same_tool_whitelist"]}

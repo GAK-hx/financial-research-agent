@@ -1,0 +1,26 @@
+[
+  {
+    "case_id": "rag-600519-channel",
+    "stock_code": "600519",
+    "query": "i茅台 渠道改革",
+    "expected_title_contains": "i茅台"
+  },
+  {
+    "case_id": "rag-600519-direct-sales",
+    "stock_code": "600519",
+    "query": "直销收入 代理渠道",
+    "expected_title_contains": "直销收入"
+  },
+  {
+    "case_id": "rag-300750-technology",
+    "stock_code": "300750",
+    "query": "技术迭代 补能生态",
+    "expected_title_contains": "技术"
+  },
+  {
+    "case_id": "rag-300750-profitability",
+    "stock_code": "300750",
+    "query": "盈利能力 市场份额",
+    "expected_title_contains": "盈利能力"
+  }
+]

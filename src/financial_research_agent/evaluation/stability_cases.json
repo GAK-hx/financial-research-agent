@@ -1,0 +1,132 @@
+{
+  "dataset_version": "phase2_stability_v1",
+  "kind": "stability",
+  "as_of_date": "2026-07-15",
+  "frozen_at": "2026-07-26T00:00:00+08:00",
+  "cases": [
+    {
+      "case_id": "stability-01",
+      "category": "market",
+      "question": "贵州茅台近6个月收益率、波动率和最大回撤",
+      "expected_intent": "market",
+      "expected_stock_codes": ["600519"],
+      "expected_start_date": "2026-01-15",
+      "expected_end_date": "2026-07-15",
+      "expected_tools": ["market_query", "indicator_calculator"],
+      "expected_skills": ["market_trend_analysis@1.0.0"],
+      "required_evidence_types": ["market", "indicator"],
+      "require_harness_controls": true
+    },
+    {
+      "case_id": "stability-02",
+      "category": "market",
+      "question": "宁德时代今年成交量与均线趋势",
+      "expected_intent": "market",
+      "expected_stock_codes": ["300750"],
+      "expected_start_date": "2026-01-01",
+      "expected_end_date": "2026-07-15",
+      "expected_tools": ["market_query", "indicator_calculator"],
+      "expected_skills": ["market_trend_analysis@1.0.0"],
+      "required_evidence_types": ["market", "indicator"],
+      "require_harness_controls": true
+    },
+    {
+      "case_id": "stability-03",
+      "category": "financial",
+      "question": "贵州茅台最近3年营收和利润增长",
+      "expected_intent": "financial",
+      "expected_stock_codes": ["600519"],
+      "expected_start_date": "2023-07-15",
+      "expected_end_date": "2026-07-15",
+      "expected_tools": ["financial_query"],
+      "expected_skills": ["financial_growth_analysis@1.0.0"],
+      "required_evidence_types": ["financial"],
+      "require_harness_controls": true
+    },
+    {
+      "case_id": "stability-04",
+      "category": "financial",
+      "question": "宁德时代近2年毛利率和负债率",
+      "expected_intent": "financial",
+      "expected_stock_codes": ["300750"],
+      "expected_start_date": "2024-07-15",
+      "expected_end_date": "2026-07-15",
+      "expected_tools": ["financial_query"],
+      "expected_skills": ["profitability_analysis@1.0.0"],
+      "required_evidence_types": ["financial"],
+      "require_harness_controls": true
+    },
+    {
+      "case_id": "stability-05",
+      "category": "report",
+      "question": "贵州茅台券商如何看渠道改革",
+      "expected_intent": "report",
+      "expected_stock_codes": ["600519"],
+      "expected_tools": ["report_search"],
+      "expected_skills": ["research_report_review@1.0.0"],
+      "required_evidence_types": ["research_report"],
+      "require_harness_controls": true
+    },
+    {
+      "case_id": "stability-06",
+      "category": "report",
+      "question": "宁德时代机构研报中的全球化观点",
+      "expected_intent": "report",
+      "expected_stock_codes": ["300750"],
+      "expected_tools": ["report_search"],
+      "expected_skills": ["research_report_review@1.0.0"],
+      "required_evidence_types": ["research_report"],
+      "require_harness_controls": true
+    },
+    {
+      "case_id": "stability-07",
+      "category": "comprehensive",
+      "question": "综合分析贵州茅台近1年行情和机构观点",
+      "expected_intent": "comprehensive",
+      "expected_stock_codes": ["600519"],
+      "expected_start_date": "2025-07-15",
+      "expected_end_date": "2026-07-15",
+      "expected_tools": ["market_query", "indicator_calculator", "report_search"],
+      "expected_skills": ["comprehensive_stock_research@1.0.0"],
+      "required_evidence_types": ["market", "indicator", "research_report"],
+      "require_harness_controls": true
+    },
+    {
+      "case_id": "stability-08",
+      "category": "comprehensive",
+      "question": "综合分析宁德时代近6个月股价、回撤和研报观点",
+      "expected_intent": "comprehensive",
+      "expected_stock_codes": ["300750"],
+      "expected_start_date": "2026-01-15",
+      "expected_end_date": "2026-07-15",
+      "expected_tools": ["market_query", "indicator_calculator", "report_search"],
+      "expected_skills": ["comprehensive_stock_research@1.0.0"],
+      "required_evidence_types": ["market", "indicator", "research_report"],
+      "require_harness_controls": true
+    },
+    {
+      "case_id": "stability-09",
+      "category": "market",
+      "question": "简版说明600519今年行情走势",
+      "expected_intent": "market",
+      "expected_stock_codes": ["600519"],
+      "expected_start_date": "2026-01-01",
+      "expected_end_date": "2026-07-15",
+      "expected_tools": ["market_query", "indicator_calculator"],
+      "expected_skills": ["market_trend_analysis@1.0.0", "concise_research_report@1.0.0"],
+      "required_evidence_types": ["market", "indicator"],
+      "require_harness_controls": true
+    },
+    {
+      "case_id": "stability-10",
+      "category": "report",
+      "question": "风险优先汇总300750机构观点",
+      "expected_intent": "report",
+      "expected_stock_codes": ["300750"],
+      "expected_tools": ["report_search"],
+      "expected_skills": ["research_report_review@1.0.0", "risk_focused_report@1.0.0"],
+      "required_evidence_types": ["research_report"],
+      "require_harness_controls": true
+    }
+  ]
+}

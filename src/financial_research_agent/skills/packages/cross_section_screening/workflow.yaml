@@ -1,0 +1,1 @@
+{"steps":["stock_comparison","coverage_check","report","validate"],"guardrails":["same_window","missing_samples_visible"]}
