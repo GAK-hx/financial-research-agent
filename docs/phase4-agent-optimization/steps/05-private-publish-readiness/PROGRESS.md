@@ -1,9 +1,10 @@
 # Step 05 进度
 
-- 状态：`PRIVATE_PUBLISH_READY`
+- 状态：`PRIVATE_REPOSITORY_CREATED`
 - 日期：2026-08-08
 - 默认模型：`deepseek-v4-flash`
-- GitHub可见性：只允许私有，尚未创建远程仓库
+- GitHub可见性：私有
+- 远程仓库：`https://github.com/GAK-hx/financial-research-agent`
 
 ## 已完成
 
@@ -19,7 +20,8 @@
 - [x] 本轮相关模块回归47/47，完整Docker/PostgreSQL回归177/177；
 - [x] Ruff通过；
 - [x] Git候选文件Secret扫描；
-- [ ] 创建私有GitHub仓库并推送首个提交。
+- [x] 创建私有GitHub仓库；
+- [ ] 完成本机GitHub认证并推送首个提交。
 
 ## 发布边界
 
