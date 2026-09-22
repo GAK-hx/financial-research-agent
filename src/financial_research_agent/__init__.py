@@ -1,2 +1,1 @@
-"""Financial research agent step-one package."""
-
+"""Evidence-grounded financial risk analysis agent."""

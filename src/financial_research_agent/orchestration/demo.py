@@ -54,7 +54,7 @@ async def run(question: str) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run the step-seven orchestration demo")
+    parser = argparse.ArgumentParser(description="Run the orchestration demo")
     parser.add_argument(
         "question",
         nargs="?",

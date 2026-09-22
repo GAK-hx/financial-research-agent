@@ -4,7 +4,7 @@ from datetime import date, datetime, timezone
 import pandas as pd
 from pydantic import ValidationError
 
-from financial_research_agent.risk.models import (
+from financial_research_agent.risk.domain.models import (
     BenchmarkSplit,
     DataAvailability,
     DisclosureEventType,
@@ -16,21 +16,21 @@ from financial_research_agent.risk.models import (
     RiskLabel,
     RiskStatus,
 )
-from financial_research_agent.risk.pit import select_visible_facts
-from financial_research_agent.risk.pools import load_correctness_pool
-from financial_research_agent.risk.normalize import normalize_eastmoney_statement
-from financial_research_agent.risk.disclosures import (
+from financial_research_agent.risk.data.pit import select_visible_facts
+from financial_research_agent.risk.data.pools import load_correctness_pool
+from financial_research_agent.risk.data.normalize import normalize_eastmoney_statement
+from financial_research_agent.risk.domain.disclosures import (
     classify_title,
     clean_title,
     normalize_disclosures,
 )
-from financial_research_agent.risk.document_audit import _direct_pdf_url
-from financial_research_agent.risk.finqa_tools import (
+from financial_research_agent.risk.data.document_audit import _direct_pdf_url
+from financial_research_agent.risk.benchmarks.finqa_tools import (
     canonicalize_finqa_program,
     execute_finqa_program,
 )
-from financial_research_agent.risk.registry import RiskMetricRegistry
-from financial_research_agent.risk.schema import DWD_FACT_SCHEMA, TABLE_SCHEMAS
+from financial_research_agent.risk.domain.registry import RiskMetricRegistry
+from financial_research_agent.risk.data.schema import DWD_FACT_SCHEMA, TABLE_SCHEMAS
 
 UTC = timezone.utc
 HASH_A = "a" * 64

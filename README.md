@@ -132,7 +132,7 @@ Agent效果只在公开标注数据上评价，自有公司数据只用于业务
 
 这些结果来自冻结题集或官方split。失败按0计入，不通过删题、无限重试或自建标签美化结果。
 
-### 工程 Gate
+### 工程验证
 
 - 5个历史截止日生成126,880条PIT特征和39,040条风险候选，未来数据泄漏和业务主键重复均为0；
 - 50用户、250次交叉查询只执行20次唯一公司分析，热态新增分析0次；两家公司更新只重算两家；
@@ -141,8 +141,9 @@ Agent效果只在公开标注数据上评价，自有公司数据只用于业务
   多租户隔离均通过；
 - Gateway滚动更新期间80/80请求返回200，跨租户读取、任务丢失和重复终态均为0。
 
-本地延迟只用于诊断，不作为生产SLA或简历性能数字。详细结论见
-[第五阶段最终Gate](docs/phase5-financial-risk-benchmark/steps/03-replay-performance-delivery/FINAL_GATE.md)。
+本地延迟只用于诊断，不作为生产SLA或简历性能数字。评测口径、完整结果和工程验证分别见
+[评测方法](docs/evaluation/methodology.md)、[公开评测结果](docs/evaluation/results.md)和
+[工程验证](docs/evaluation/engineering-validation.md)。
 
 ## 快速启动
 
@@ -237,8 +238,7 @@ docker compose --profile rag run --rm rag-index \
 - 非root、只读根文件系统、最小Linux capability与独立ServiceAccount；
 - Secret与ConfigMap边界，以及共享湖PVC。
 
-本地运行步骤见[Kubernetes运行手册](docs/phase5-financial-risk-benchmark/steps/03-replay-performance-delivery/K8S_RUNBOOK.md)，
-实测故障恢复见[Kubernetes运行报告](docs/phase5-financial-risk-benchmark/steps/03-replay-performance-delivery/K8S_RUNTIME_REPORT.md)。
+本地部署、资源边界和已验证场景见[Kubernetes部署说明](docs/operations/kubernetes.md)。
 
 ## 项目结构
 
@@ -247,10 +247,15 @@ financial-research-agent/
 ├── backend-gateway/                 # Java / Spring外部接入层
 ├── deploy/k8s/                      # Kubernetes Base与Kind Overlay
 ├── migrations/                      # PostgreSQL / Alembic迁移
-├── scripts/                         # 可复现Gate与运维脚本
+├── scripts/                         # 可复现评测、容量验证与运维脚本
 ├── src/financial_research_agent/
 │   ├── financial/                   # 财务采集、标准化与质量审计
-│   ├── risk/                        # PIT特征、风险Agent与公开Benchmark
+│   ├── risk/
+│   │   ├── domain/                  # 风险模型与指标定义
+│   │   ├── data/                    # PIT数据、质量与特征管道
+│   │   ├── agents/                  # 风险Supervisor与团队运行
+│   │   ├── benchmarks/              # 公开Benchmark适配与评分
+│   │   └── validation/              # 数据、缓存、Spark与部署验证
 │   ├── orchestration/               # LangGraph、Planner、Executor
 │   ├── governance/                  # Policy、预算与完成条件
 │   ├── skills/                      # 版本化Skill
@@ -268,14 +273,16 @@ financial-research-agent/
 
 ## 文档入口
 
-- [第五阶段：企业财务风险与公开Benchmark](docs/phase5-financial-risk-benchmark/README.md)
-- [Agent岗位交付说明](docs/phase5-financial-risk-benchmark/steps/03-replay-performance-delivery/DELIVERY_AGENT.md)
-- [数据分析岗位交付说明](docs/phase5-financial-risk-benchmark/steps/03-replay-performance-delivery/DELIVERY_DATA_ANALYSIS.md)
-- [数据开发岗位交付说明](docs/phase5-financial-risk-benchmark/steps/03-replay-performance-delivery/DELIVERY_DATA_ENGINEERING.md)
-- [项目完整设计文档](docs/project-introduction/README.md)
-- [Spring Gateway运行手册](docs/phase4-agent-optimization/steps/08-spring-redis-concurrency/RUNBOOK_08_2.md)
-- [私有仓库发布前审计](docs/RELEASE_AUDIT_20260922.md)
-- [GitHub SSH与空配置模板用法](docs/security/SSH_SETUP.md)
+- [文档索引](docs/README.md)
+- [系统架构](docs/architecture/overview.md)
+- [Agent运行时](docs/architecture/agent-runtime.md)
+- [数据平台](docs/architecture/data-platform.md)
+- [服务与并发架构](docs/architecture/service-runtime.md)
+- [评测方法与结果](docs/evaluation/methodology.md)
+- [本地与Docker运行](docs/operations/local-development.md)
+- [Kubernetes部署](docs/operations/kubernetes.md)
+- [代码组织与演进](docs/development/code-organization.md)
+- [GitHub SSH与配置安全](docs/security/SSH_SETUP.md)
 
 ## 已知限制
 
@@ -286,6 +293,6 @@ financial-research-agent/
 - 本地Kind三节点共享一台Mac；HPA未在metrics-server下做动态扩缩容验证；
 - 本地RWO湖PVC、PostgreSQL和Redis不能直接作为云上生产存储方案；
 - Kubernetes CronJob目前只验证湖命名空间初始化，尚未接入完整定时增量采集；
-- 镜像漏洞/SBOM Gate、云上容量测试和多可用区部署仍属于生产化工作。
+- 镜像漏洞与SBOM检查、云上容量测试和多可用区部署仍属于生产化工作。
 
-仓库保持私有，除非所有者明确决定改变可见性。
+公开仓库只包含空配置模板、可复现代码和公开数据集评测说明；个人密钥、本机配置和私有数据不进入版本库。

@@ -119,7 +119,7 @@ class RedisSharedStateIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 redis_enabled=True,
                 redis_url=os.environ["REDIS_TEST_URL"],
                 redis_password=os.getenv("REDIS_TEST_PASSWORD", ""),
-                redis_key_prefix="financial-agent-gate",
+                redis_key_prefix="financial-agent-validation",
             )
         )
         await self.state.client.flushdb()

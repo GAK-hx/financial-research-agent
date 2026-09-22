@@ -233,7 +233,7 @@ def ensure_json_safe_graph_state(value: Any) -> None:
 
 
 class LangGraphResearchService:
-    """StateGraph mapping of the phase-one research path.
+    """StateGraph mapping of the controlled research path.
 
     Business validation, controlled tools, retry policy, evidence construction and
     report validation are deliberately reused. The graph owns state transitions and

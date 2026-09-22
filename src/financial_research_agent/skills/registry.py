@@ -103,7 +103,7 @@ class SkillRegistry:
             for item in selection.snapshots
         ):
             # Comprehensive intent can represent any explicit combination of
-            # market, financial and report domains. Its runtime Evidence gate
+            # market, financial and report domains. Its runtime Evidence check
             # must follow the original question instead of a fixed superset.
             requirements: dict[str, int] = {}
             if "market" in query.analysis_domains:

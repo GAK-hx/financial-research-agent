@@ -1,5 +1,5 @@
 {
-  "dataset_version": "phase2_stability_v1",
+  "dataset_version": "agent_stability_v1",
   "kind": "stability",
   "as_of_date": "2026-07-15",
   "frozen_at": "2026-07-26T00:00:00+08:00",

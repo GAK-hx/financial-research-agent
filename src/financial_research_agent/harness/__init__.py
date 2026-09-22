@@ -1,4 +1,4 @@
 """Phase-two harness experiments.
 
-The production API does not import this package during Step 01.
+The production API imports this package only for the controlled agent runtime.
 """

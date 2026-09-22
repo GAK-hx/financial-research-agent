@@ -8,7 +8,7 @@ from financial_research_agent.skills.models import SkillSelection
 
 
 class EvidenceSufficiencyChecker:
-    """Deterministic gate; the model cannot invent its own replan scope."""
+    """Deterministic check; the model cannot invent its own replan scope."""
 
     def check(
         self,

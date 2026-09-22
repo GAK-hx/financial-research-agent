@@ -119,7 +119,7 @@ def _current_retrieval(settings: Settings) -> dict[str, str]:
     return {
         "embedding_model": settings.rag_embedding_model,
         "collection": "research_reports_v1",
-        "index_policy": "phase1_dense_baseline",
+        "index_policy": "dense_baseline_v1",
     }
 
 

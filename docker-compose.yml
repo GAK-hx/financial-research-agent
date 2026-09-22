@@ -257,7 +257,7 @@ services:
     restart: "no"
     networks: [agent-net]
 
-  risk-step01:
+  risk-data-test:
     profiles: ["risk"]
     build:
       context: .
@@ -286,7 +286,7 @@ services:
     restart: "no"
     networks: [agent-net]
 
-  risk-step01-cached-ingest:
+  risk-data-cached-ingest:
     profiles: ["risk-cached"]
     image: financial-research-agent-financial-ingest:latest
     pull_policy: never
@@ -315,7 +315,7 @@ services:
     restart: "no"
     networks: [agent-net]
 
-  risk-step01-cached-eval:
+  risk-data-cached-eval:
     profiles: ["risk-cached"]
     image: financial-research-agent-job-api:latest
     pull_policy: never
@@ -344,7 +344,7 @@ services:
     restart: "no"
     networks: [agent-net]
 
-  risk-step03-spark:
+  risk-spark-validation:
     profiles: ["risk-cached"]
     image: financial-research-agent-factor-batch:latest
     pull_policy: never
@@ -352,9 +352,9 @@ services:
       [
         "python",
         "-m",
-        "financial_research_agent.risk.spark_iceberg_gate",
+        "financial_research_agent.risk.validation.spark_iceberg",
         "--output-root",
-        "/artifacts/phase5_step03/spark_iceberg_v1",
+        "/artifacts/runtime_validation/spark_iceberg_v1",
         "--rows",
         "5000000",
         "--cpus",

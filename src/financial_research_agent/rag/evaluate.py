@@ -76,7 +76,7 @@ def evaluate(top_k: int = 5) -> dict:
             **hybrid_score,
             "mean_latency_ms": sum(hybrid_latency) / len(hybrid_latency),
         },
-        "gate": {
+        "validation": {
             "hybrid_recall_not_below_dense": (
                 hybrid_score["recall_at_k"] >= dense_score["recall_at_k"]
             ),
@@ -93,7 +93,7 @@ def evaluate(top_k: int = 5) -> dict:
             for case in cases
         ],
     }
-    output = Path(settings.artifacts_root) / "phase4" / "step02" / "rag_evaluation.json"
+    output = Path(settings.artifacts_root) / "retrieval_evaluation" / "rag_evaluation.json"
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     return report

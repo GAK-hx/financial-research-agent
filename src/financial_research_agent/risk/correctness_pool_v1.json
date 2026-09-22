@@ -2,7 +2,7 @@
   "pool_id": "issuer_risk_correctness_pool",
   "version": "v1",
   "frozen_at": "2026-09-07",
-  "selection_policy": "在查看本阶段接口覆盖和模型结果前冻结；覆盖消费、制造、医药、新能源、资源、地产以及不适用通用比率的金融机构，用于验证字段、时点、缺失和行业边界，不代表真实风险发生率。",
+  "selection_policy": "在查看接口覆盖和模型结果前冻结；覆盖消费、制造、医药、新能源、资源、地产以及不适用通用比率的金融机构，用于验证字段、时点、缺失和行业边界，不代表真实风险发生率。",
   "entries": [
     {"issuer_id": "600519", "issuer_name": "贵州茅台", "industry_group": "食品饮料", "business_type": "non_financial", "generic_ratio_applicable": true, "selection_reason": "高质量消费企业对照与现有系统兼容标的"},
     {"issuer_id": "000858", "issuer_name": "五粮液", "industry_group": "食品饮料", "business_type": "non_financial", "generic_ratio_applicable": true, "selection_reason": "同业字段与横向口径核验"},

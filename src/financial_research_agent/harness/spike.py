@@ -68,7 +68,7 @@ def ensure_json_safe_state(value: Any) -> None:
 
 
 class LangGraphSpike:
-    """A sidecar graph used only to validate phase-two compatibility."""
+    """A sidecar graph used only to validate runtime compatibility."""
 
     def __init__(
         self,

@@ -1,6 +1,6 @@
 """Point-in-time financial-risk data and benchmark primitives."""
 
-from financial_research_agent.risk.models import (
+from financial_research_agent.risk.domain.models import (
     BenchmarkExpectedAnswer,
     BenchmarkSplit,
     DataAvailability,
@@ -18,7 +18,7 @@ from financial_research_agent.risk.models import (
     RiskMetricDefinition,
     RiskStatus,
 )
-from financial_research_agent.risk.registry import RiskMetricRegistry
+from financial_research_agent.risk.domain.registry import RiskMetricRegistry
 
 __all__ = [
     "BenchmarkExpectedAnswer",

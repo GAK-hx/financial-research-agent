@@ -32,7 +32,7 @@ def load_dataset() -> tuple[str, list[EvaluationCase]]:
     dataset, _ = load_named_dataset("regression")
     cases = dataset.cases
     if len(cases) != 20 or len({case.case_id for case in cases}) != 20:
-        raise ValueError("phase-one evaluation dataset must contain 20 unique cases")
+        raise ValueError("core evaluation dataset must contain 20 unique cases")
     return dataset.dataset_version, cases
 
 
@@ -83,13 +83,13 @@ async def _request_case(
                 "/analyze",
                 json={
                     "question": case.question,
-                    "tenant_id": "step08-evaluation",
+                    "tenant_id": "evaluation-tenant",
                     "user_id": "runner",
                     "session_id": f"{case.case_id}-isolated",
                 },
                 headers={
                     "Idempotency-Key": (
-                        f"step08-{case.case_id}-{attempt}-"
+                        f"evaluation-{case.case_id}-{attempt}-"
                         f"{datetime.now(timezone.utc).timestamp()}"
                     )
                 },
@@ -147,7 +147,7 @@ def _operational_metrics(artifacts: list[EvaluationArtifact]) -> dict[str, Any]:
 def _failure_markdown(artifacts: list[EvaluationArtifact]) -> str:
     failed = [item for item in artifacts if not item.score.task_success]
     lines = [
-        "# Step 08失败用例原始输出",
+        "# 评测失败用例原始输出",
         "",
         f"失败数：{len(failed)}/{len(artifacts)}",
         "",
@@ -228,7 +228,7 @@ async def run() -> None:
         cases = []
     root = (
         Path(active_settings.artifacts_root)
-        / "phase2_step08"
+        / "agent_evaluation"
         / dataset_name
     )
     run_label = os.environ.get("EVAL_RUN_LABEL", "").strip()

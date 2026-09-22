@@ -110,7 +110,7 @@ async def run() -> None:
     target = Path(
         os.environ.get(
             "CONTEXT_AB_OUTPUT",
-            "/artifacts/phase2_step06/context_gate/context_ab.json",
+            "/artifacts/context_evaluation/context_gate/context_ab.json",
         )
     )
     target.parent.mkdir(parents=True, exist_ok=True)

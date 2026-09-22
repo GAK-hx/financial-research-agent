@@ -76,12 +76,12 @@ class EvaluationTests(unittest.TestCase):
 
     def test_dataset_has_twenty_unique_cases_and_financial_coverage(self):
         version, cases = load_dataset()
-        self.assertEqual(version, "phase1_eval_v1")
+        self.assertEqual(version, "core_eval_v1")
         self.assertEqual(len(cases), 20)
         self.assertEqual(len({case.case_id for case in cases}), 20)
         self.assertIn("financial", {case.category for case in cases})
 
-    def test_phase_two_datasets_are_frozen_unique_and_complete(self):
+    def test_agent_datasets_are_frozen_unique_and_complete(self):
         holdout, holdout_hash = load_named_dataset("holdout")
         stability, stability_hash = load_named_dataset("stability")
         self.assertEqual(len(holdout.cases), 30)
@@ -134,7 +134,7 @@ class EvaluationTests(unittest.TestCase):
     def test_snapshot_manifest_detects_dataset_or_content_drift(self):
         manifest = EvaluationSnapshotManifest(
             dataset_name="regression",
-            dataset_version="phase1_eval_v1",
+            dataset_version="core_eval_v1",
             dataset_sha256="a" * 64,
             as_of_date="2026-07-15",
             captured_at=datetime.now(timezone.utc),

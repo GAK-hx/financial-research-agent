@@ -146,8 +146,8 @@ def test_event_gap_can_trigger_only_one_bounded_supplement() -> None:
     assert second.termination_reason == "EVIDENCE_INSUFFICIENT_REPLAN_LIMIT"
 
 
-class Step3AnalysisSkillsTests(unittest.TestCase):
-    """Keep the Step 3 coverage in the project's unittest regression gate."""
+class AnalysisSkillsTests(unittest.TestCase):
+    """Keep analysis-skill coverage in the project's unittest regression suite."""
 
     def test_factor_registry_and_demo_universe_are_versioned(self) -> None:
         test_factor_registry_and_demo_universe_are_versioned()

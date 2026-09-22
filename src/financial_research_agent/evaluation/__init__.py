@@ -1,1 +1,1 @@
-"""Reproducible acceptance evaluation for the phase-one research agent."""
+"""Reproducible acceptance evaluation for the research agent."""

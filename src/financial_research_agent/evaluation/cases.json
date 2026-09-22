@@ -1,5 +1,5 @@
 {
-  "dataset_version": "phase1_eval_v1",
+  "dataset_version": "core_eval_v1",
   "kind": "regression",
   "as_of_date": "2026-07-15",
   "frozen_at": "2026-07-15T00:00:00+08:00",

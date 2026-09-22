@@ -60,7 +60,7 @@ async def run_live_spike(question: str, *, require_model: bool) -> dict:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run the isolated LangGraph phase-two spike.")
+    parser = argparse.ArgumentParser(description="Run the isolated LangGraph compatibility check.")
     parser.add_argument(
         "--question",
         default="贵州茅台最近三年营收和利润",

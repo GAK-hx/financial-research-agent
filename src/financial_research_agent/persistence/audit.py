@@ -143,7 +143,7 @@ async def inspect_database() -> dict:
 
 
 async def main_async() -> None:
-    parser = argparse.ArgumentParser(description="Step 03 persistence recovery audit.")
+    parser = argparse.ArgumentParser(description="Persistence recovery audit.")
     subparsers = parser.add_subparsers(dest="command", required=True)
     interrupt_parser = subparsers.add_parser("interrupt")
     interrupt_parser.add_argument("--thread-id", required=True)

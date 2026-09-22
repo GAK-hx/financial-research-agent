@@ -27,7 +27,7 @@ def _memory_record() -> MemoryRecord:
     return MemoryRecord(
         memory_id=uuid4().hex,
         scope=MemoryScope(
-            tenant_id="step08-ab",
+            tenant_id="evaluation-ab",
             user_id="runner",
             session_id="memory-ab",
         ),
@@ -38,7 +38,7 @@ def _memory_record() -> MemoryRecord:
         status=MemoryStatus.ACTIVE,
         source=MemorySource(
             source_type="query_spec",
-            source_id="step08-ab",
+            source_id="evaluation-ab",
         ),
         created_at=now,
         updated_at=now,
@@ -98,7 +98,7 @@ async def run() -> None:
             policy_version="financial_read_only_v1",
             compression_enabled=enabled,
         ).build_report(
-            run_id=f"step08-compression-{enabled}",
+            run_id=f"compression-ab-{enabled}",
             node_name="generate_report",
             query=query,
             evidence=evidence,
@@ -144,7 +144,7 @@ async def run() -> None:
     target = Path(
         os.environ.get(
             "FEATURE_AB_OUTPUT",
-            "/artifacts/phase2_step08/feature_ab.json",
+            "/artifacts/agent_evaluation/feature_ab.json",
         )
     )
     target.parent.mkdir(parents=True, exist_ok=True)

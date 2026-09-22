@@ -10,7 +10,7 @@ class ToolRegistry:
         if name in self._tools:
             raise ValueError(f"tool already registered: {name}")
         if not tool.definition.read_only:
-            raise ValueError("step-one registry only accepts read-only tools")
+            raise ValueError("tool registry only accepts read-only tools")
         if tool.definition.data_domain == "simulation":
             raise ValueError("formal registry rejects simulation tools")
         self._tools[name] = tool
