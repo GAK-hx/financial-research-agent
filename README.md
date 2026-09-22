@@ -141,8 +141,7 @@ Agent效果只在公开标注数据上评价，自有公司数据只用于业务
   多租户隔离均通过；
 - Gateway滚动更新期间80/80请求返回200，跨租户读取、任务丢失和重复终态均为0。
 
-本地延迟只用于诊断，不作为生产SLA或简历性能数字。完整口径与结果见
-[评测结果](docs/EVALUATION.md)。
+本地延迟只用于诊断，不作为生产SLA或简历性能数字。
 
 ## 快速启动
 
@@ -275,7 +274,6 @@ financial-research-agent/
 - [功能说明](docs/FEATURES.md)
 - [快速使用](docs/GETTING_STARTED.md)
 - [组件架构](docs/ARCHITECTURE.md)
-- [评测结果](docs/EVALUATION.md)
 
 ## 使用边界
 
