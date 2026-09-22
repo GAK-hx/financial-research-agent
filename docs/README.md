@@ -1,36 +1,12 @@
-# Morshan 文档
+# Morshan
 
-文档按系统职责组织，不记录开发阶段、临时计划或对话过程。
+Morshan用于企业财务风险分析与证据复核，覆盖财务数据处理、风险候选生成、Agent取证、报告校验和多用户
+任务执行。
 
-## 架构
+- [功能说明](FEATURES.md)：系统能完成哪些分析，以及输出什么结果；
+- [快速使用](GETTING_STARTED.md)：配置、Docker启动、API调用和数据任务；
+- [组件架构](ARCHITECTURE.md)：LangChain、LangGraph、数据湖、检索和服务端组件；
+- [评测结果](EVALUATION.md)：公开Benchmark与工程验证结果。
 
-- [系统总览](architecture/overview.md)：职责边界、请求链路与主要组件；
-- [Agent运行时](architecture/agent-runtime.md)：LangChain、LangGraph、Harness、Tool、Skill与Evidence；
-- [数据与检索平台](architecture/data-platform.md)：Point-in-Time数据、Iceberg、Spark、RAG与缓存；
-- [服务与部署](architecture/service-runtime.md)：API、Worker、PostgreSQL、Redis、Gateway与Kubernetes。
-
-## 评测
-
-- [评测方法](evaluation/methodology.md)：公开Benchmark、数据隔离和指标口径；
-- [模型与Agent结果](evaluation/results.md)：FinanceBench、FinQA、TAT-QA与V4FinBench；
-- [工程验证](evaluation/engineering-validation.md)：回放、缓存、增量计算和故障恢复。
-
-## 运维
-
-- [本地开发与Docker](operations/local-development.md)；
-- [Kubernetes部署](operations/kubernetes.md)；
-- [安全与发布](operations/security.md)。
-
-## 开发
-
-- [代码结构与重构边界](development/code-organization.md)；
-- [架构决策](development/decisions.md)。
-
-## 参考
-
-- [财务指标口径](reference/financial-metrics.md)；
-- [市场指标口径](reference/market-indicators.md)；
-- [SSH空配置模板](security/SSH_SETUP.md)。
-
-运行产物、第三方数据、真实研报和私有评测集不进入Git。公开文档中的数字均来自公开Benchmark或明确标记的
-工程测试，不混用业务演示数据与准确率结论。
+指标定义可查阅[财务指标口径](reference/financial-metrics.md)和
+[市场指标口径](reference/market-indicators.md)。

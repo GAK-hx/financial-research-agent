@@ -141,9 +141,8 @@ Agent效果只在公开标注数据上评价，自有公司数据只用于业务
   多租户隔离均通过；
 - Gateway滚动更新期间80/80请求返回200，跨租户读取、任务丢失和重复终态均为0。
 
-本地延迟只用于诊断，不作为生产SLA或简历性能数字。评测口径、完整结果和工程验证分别见
-[评测方法](docs/evaluation/methodology.md)、[公开评测结果](docs/evaluation/results.md)和
-[工程验证](docs/evaluation/engineering-validation.md)。
+本地延迟只用于诊断，不作为生产SLA或简历性能数字。完整口径与结果见
+[评测结果](docs/EVALUATION.md)。
 
 ## 快速启动
 
@@ -238,7 +237,7 @@ docker compose --profile rag run --rm rag-index \
 - 非root、只读根文件系统、最小Linux capability与独立ServiceAccount；
 - Secret与ConfigMap边界，以及共享湖PVC。
 
-本地部署、资源边界和已验证场景见[Kubernetes部署说明](docs/operations/kubernetes.md)。
+本地与Kubernetes运行方式见[快速使用](docs/GETTING_STARTED.md)。
 
 ## 项目结构
 
@@ -273,21 +272,12 @@ financial-research-agent/
 
 ## 文档入口
 
-- [文档索引](docs/README.md)
-- [系统架构](docs/architecture/overview.md)
-- [Agent运行时](docs/architecture/agent-runtime.md)
-- [数据平台](docs/architecture/data-platform.md)
-- [服务与并发架构](docs/architecture/service-runtime.md)
-- [评测方法与结果](docs/evaluation/methodology.md)
-- [本地与Docker运行](docs/operations/local-development.md)
-- [Kubernetes部署](docs/operations/kubernetes.md)
-- [代码组织与演进](docs/development/code-organization.md)
-- [GitHub SSH与配置安全](docs/security/SSH_SETUP.md)
+- [功能说明](docs/FEATURES.md)
+- [快速使用](docs/GETTING_STARTED.md)
+- [组件架构](docs/ARCHITECTURE.md)
+- [评测结果](docs/EVALUATION.md)
 
 ## 使用边界
 
-- 当前版本面向日线、财务和中长期风险分析，不提供实时行情或交易能力；
-- 分析质量仍受公开数据源的披露时间、修订记录和事件覆盖影响；
-- Docker Compose与本地Kind用于复现和工程验证，云上高可用与容量规划需结合实际环境完成。
-
-公开仓库只包含空配置模板、可复现代码和公开数据集评测说明；个人密钥、本机配置和私有数据不进入版本库。
+当前版本面向日线、财务和中长期风险分析，不提供实时行情或交易能力。Docker Compose与Kind用于本地运行，
+评测中的小规模Agent对比和本机性能数据不作为完整Benchmark成绩或生产SLA。
