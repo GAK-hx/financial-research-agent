@@ -275,6 +275,7 @@ financial-research-agent/
 - [项目完整设计文档](docs/project-introduction/README.md)
 - [Spring Gateway运行手册](docs/phase4-agent-optimization/steps/08-spring-redis-concurrency/RUNBOOK_08_2.md)
 - [私有仓库发布前审计](docs/RELEASE_AUDIT_20260922.md)
+- [GitHub SSH与空配置模板用法](docs/security/SSH_SETUP.md)
 
 ## 已知限制
 
