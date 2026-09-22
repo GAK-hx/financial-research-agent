@@ -61,7 +61,8 @@ async def run() -> None:
             "indicator_calculator",
             "financial_query",
             "stock_comparison",
-            "report_search",
+            "report_candidate_search",
+            "report_content_search",
         },
     )
     evidence = [_fixture(rows)]

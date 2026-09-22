@@ -1,0 +1,81 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: financial-agent
+  labels:
+    app.kubernetes.io/part-of: financial-risk-agent
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: financial-agent-runtime
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: financial-agent-config
+data:
+  AGENT_FRAMEWORK: langchain
+  ORCHESTRATION_RUNTIME: langgraph
+  CHECKPOINT_BACKEND: postgres
+  LANGGRAPH_STRICT_MSGPACK: "true"
+  MODEL_PROVIDER: openai_compatible
+  MODEL_NAME: deepseek-flash
+  MODEL_BASE_URL: https://api.deepseek.com
+  IDENTITY_MODE: api_key
+  ANALYZE_VIA_JOBS: "true"
+  PROVIDER_SHARED_RATE_LIMIT_ENABLED: "true"
+  REDIS_ENABLED: "true"
+  ELASTICSEARCH_ENABLED: "true"
+  ELASTICSEARCH_URL: http://elasticsearch:9200
+  MILVUS_ENABLED: "true"
+  MILVUS_HOST: milvus
+  MILVUS_PORT: "19530"
+  ICEBERG_WAREHOUSE: file:///lake/iceberg
+  LAKE_ROOT: /lake
+  ARTIFACTS_ROOT: /artifacts
+  REPORTS_DIR: /data/reports
+  DEMO_UI_ENABLED: "false"
+  HOME: /tmp
+  XDG_CACHE_HOME: /tmp/cache
+  GATEWAY_PYTHON_BASE_URL: http://job-api:8000
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  GATEWAY_RATE_LIMIT_REPLENISH_RATE: "5"
+  GATEWAY_RATE_LIMIT_BURST_CAPACITY: "10"
+  GATEWAY_RATE_LIMIT_REQUESTED_TOKENS: "1"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: agent-lake
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: job-api
+spec:
+  selector:
+    app.kubernetes.io/name: job-api
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-gateway
+spec:
+  selector:
+    app.kubernetes.io/name: backend-gateway
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

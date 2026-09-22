@@ -16,9 +16,18 @@ while IFS= read -r file; do
     scripts/secret_scan.sh|*.example) continue ;;
   esac
   if [ -f "$file" ] && LC_ALL=C grep -Iq . "$file"; then
-    if LC_ALL=C grep -nE "$pattern" "$file"; then
+    while IFS=: read -r line_number _; do
+      [ -n "$line_number" ] || continue
+      line=$(sed -n "${line_number}p" "$file")
+      # References to an environment variable are injection instructions, not values.
+      if printf '%s\n' "$line" | LC_ALL=C grep -Eq \
+        '(MODEL_API_KEY|API_KEY|SECRET|TOKEN|PASSWORD)[[:space:]]*=[[:space:]]*["]?\$\{?[A-Z0-9_]+\}?["]?'; then
+        continue
+      fi
+      # Never print the matching line: CI logs must not repeat a leaked credential.
+      printf 'potential secret: %s:%s\n' "$file" "$line_number"
       found=1
-    fi
+    done < <(LC_ALL=C grep -nE "$pattern" "$file" || true)
   fi
 done < <(git ls-files --cached --others --exclude-standard)
 

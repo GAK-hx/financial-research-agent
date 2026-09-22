@@ -36,7 +36,7 @@ class ToolRegistry:
                     "readOnlyHint": True,
                     "destructiveHint": False,
                     "idempotentHint": True,
-                    "openWorldHint": False,
+                    "openWorldHint": tool.definition.data_domain == "public_web",
                 },
             }
             for tool in self._tools.values()

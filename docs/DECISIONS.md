@@ -34,6 +34,7 @@
 | ADR-028 | 开发验证节奏 | 子任务只做最小冒烟；每个Step收尾集中执行专项、全量、评测和真实链路，问题修正后只做针对性确认 | 减少重复且无信息增量的测试，把时间用于实现和设计审核 | Step 2 | Accepted | 2026-07-24 |
 | ADR-029 | Step 02关闭 | 接受StateGraph等价迁移技术Go结论；DeepSeek网络稳定性继续作为Step 05风险处理 | 最终镜像81/81通过，确定性指标18/18，双方成功用例16/16语义一致 | Step 2 | Accepted | 2026-07-24 |
 | ADR-030 | 默认模型 | Planner、报告、修订、摘要、Reviewer和项目评测默认统一使用正式版`deepseek-v4-flash`；Pro只允许显式实验覆盖，不作为自动路由或失败降级 | 按当前模型版本的项目选型，Flash已成为质量、延迟和成本更合适的统一默认；统一模型也便于维护可比较的评测基线 | 全项目 | Accepted | 2026-08-08 |
+| ADR-031 | V4.1 Flash升级 | 生产与公开Benchmark默认改用DeepSeek V4.1 Flash正式API名`deepseek-flash`；退役别名`deepseek-v4-flash`只保留在历史证据和兼容说明中，不作为独立模型对比 | DeepSeek官方已退役V4 Flash并将旧名临时路由到V4.1 Flash；使用正式名称避免临时别名失效及伪造模型差异 | 全项目 | Accepted | 2026-09-16 |
 | ADR-031 | 生产与评测时钟 | 生产按`Asia/Shanghai`真实当前日期运行；只有冻结评测显式设置参考日期 | 避免Demo参考日期污染生产语义，同时保持相对时间评测可复现 | Phase 4 Step 01 | Accepted | 2026-08-08 |
 | ADR-032 | 语义对齐边界 | 在Tool执行前独立复核原问题与QuerySpec的实体、时间、粒度、维度和分析域；不确定相对时间拒绝静默猜测 | 结构化Schema正确不等于用户语义正确，必须在真实数据访问前阻断漂移 | Phase 4 Step 01 | Accepted | 2026-08-08 |
 | ADR-033 | 报告证据结构 | 摘要、结论、风险和含数字限制均使用当前Run Evidence ID；风险记录事实/计算/模型解释分类 | 把引用从“有ID”升级为可验证的数字、实体、日期和Source Locator支撑关系 | Phase 4 Step 01 | Accepted | 2026-08-08 |

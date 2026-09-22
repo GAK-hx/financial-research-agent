@@ -10,5 +10,6 @@ pyarrow>=17,<22
 pydantic>=2.9,<3
 pydantic-settings>=2.5,<3
 pyiceberg[sql-sqlite]>=0.8,<1
+sympy>=1.13,<2
 tenacity>=9,<10
 uvicorn[standard]>=0.30,<1

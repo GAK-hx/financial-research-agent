@@ -229,6 +229,159 @@ class ProviderRateWindowRecord(Base):
     )
 
 
+class RetrievalWorkUnitRecord(Base):
+    __tablename__ = "retrieval_work_units"
+    __table_args__ = (
+        UniqueConstraint(
+            "key_hash", "generation", name="uq_retrieval_work_key_generation"
+        ),
+        Index(
+            "ix_retrieval_work_claim",
+            "status",
+            "lease_expires_at",
+            "updated_at",
+        ),
+        Index("ix_retrieval_work_key", "key_hash", "generation"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    generation: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    atomic_key: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    visibility: Mapped[str] = mapped_column(String(16), nullable=False)
+    tenant_id: Mapped[str | None] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    lease_owner: Mapped[str | None] = mapped_column(String(128))
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    waiter_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_error: Mapped[str | None] = mapped_column(String(256))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class JobWorkDependencyRecord(Base):
+    __tablename__ = "job_work_dependencies"
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id", "task_id", "work_unit_id", name="uq_job_work_dependency"
+        ),
+        Index("ix_job_work_dependency_work", "work_unit_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    run_id: Mapped[str] = mapped_column(
+        ForeignKey("research_jobs.run_id", ondelete="CASCADE"), nullable=False
+    )
+    task_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    work_unit_id: Mapped[str] = mapped_column(
+        ForeignKey("retrieval_work_units.id", ondelete="CASCADE"), nullable=False
+    )
+    cache_decision: Mapped[str] = mapped_column(String(16), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class RetrievalSnapshotRecord(Base):
+    __tablename__ = "retrieval_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "key_hash", "generation", name="uq_retrieval_snapshot_generation"
+        ),
+        Index("ix_retrieval_snapshot_expiry", "key_hash", "expires_at"),
+    )
+
+    snapshot_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    work_unit_id: Mapped[str] = mapped_column(
+        ForeignKey("retrieval_work_units.id", ondelete="CASCADE"), nullable=False
+    )
+    key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    atomic_key: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    source_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    result_payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    evidence_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    watermark: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    refreshed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+class AnalysisArtifactRecord(Base):
+    __tablename__ = "analysis_artifacts"
+    __table_args__ = (
+        UniqueConstraint("analysis_key", name="uq_analysis_artifact_key"),
+        Index(
+            "ix_analysis_artifact_lookup",
+            "analysis_key",
+            "validated",
+            "expires_at",
+        ),
+    )
+
+    artifact_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    analysis_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    analysis_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    subjects: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    snapshot_dependencies: Mapped[dict[str, str]] = mapped_column(
+        JSONB, nullable=False
+    )
+    skill_versions: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    model_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    prompt_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    policy_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    validated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    visibility: Mapped[str] = mapped_column(String(16), nullable=False)
+    tenant_id: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+class ArtifactDependencyRecord(Base):
+    __tablename__ = "artifact_dependencies"
+    __table_args__ = (
+        UniqueConstraint(
+            "artifact_id", "snapshot_id", name="uq_artifact_snapshot_dependency"
+        ),
+        Index("ix_artifact_dependency_snapshot", "snapshot_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    artifact_id: Mapped[str] = mapped_column(
+        ForeignKey("analysis_artifacts.artifact_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    snapshot_id: Mapped[str] = mapped_column(
+        ForeignKey("retrieval_snapshots.snapshot_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    evidence_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class RunEventRecord(Base):
     __tablename__ = "run_events"
     __table_args__ = (

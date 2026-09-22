@@ -37,8 +37,8 @@ class TriggerRule(BaseModel):
 
 class EvidenceRequirement(BaseModel):
     evidence_type: Literal[
-        "market", "financial", "indicator", "research_report", "technical",
-        "fundamental", "factor", "event", "comparison"
+        "market", "financial", "indicator", "report_candidate", "research_report", "technical",
+        "fundamental", "factor", "event", "web_source", "comparison"
     ]
     minimum_count: int = Field(default=1, ge=1, le=20)
 

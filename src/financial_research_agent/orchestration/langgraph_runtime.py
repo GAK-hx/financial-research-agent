@@ -23,6 +23,9 @@ from financial_research_agent.domain.models import (
     Evidence,
     ExecutionMetadata,
     QuerySpec,
+    ReportAnalysisRequest,
+    ReportFact,
+    ReportValidationProfile,
     ResearchReport,
     SemanticAlignmentResult,
     ToolResult,
@@ -55,8 +58,18 @@ from financial_research_agent.orchestration.context import (
 )
 from financial_research_agent.orchestration.evidence_builder import EvidenceBuilder
 from financial_research_agent.orchestration.factory import build_orchestration_service
+from financial_research_agent.rag.models import ReportSelection
+from financial_research_agent.retrieval.coordinator import atomic_key_for_task
+from financial_research_agent.retrieval.models import (
+    AnalysisArtifact,
+    ArtifactVisibility,
+    CacheDecision,
+    PresentationEnvelope,
+    build_analysis_key,
+)
 from financial_research_agent.reporting.context import build_report_context
 from financial_research_agent.reporting.factory import build_reporting_service
+from financial_research_agent.reporting.facts import ReportFactExtractor
 from financial_research_agent.reporting.service import ReportingResult
 from financial_research_agent.reporting.validators import (
     bind_report_data_as_of,
@@ -96,6 +109,14 @@ class ResearchGraphState(TypedDict, total=False):
     orchestration_stage: str
     reporting_status: str | None
     query_spec: dict[str, Any] | None
+    report_request: dict[str, Any] | None
+    report_candidate_set: dict[str, Any] | None
+    report_selection: dict[str, Any] | None
+    report_facts: list[dict[str, Any]]
+    report_validation_profile: str | None
+    report_depth_reason: str | None
+    report_content_retrieved: bool
+    report_content_missing_documents: list[str]
     semantic_alignment: dict[str, Any] | None
     execution_metadata: dict[str, Any] | None
     skill_selection: dict[str, Any] | None
@@ -122,6 +143,13 @@ class ResearchGraphState(TypedDict, total=False):
     reporting_errors: list[str]
     node_trace: list[str]
     terminal_writes: int
+    atomic_work: list[dict[str, Any]]
+    cache_summary: dict[str, Any]
+    retrieval_snapshots: dict[str, str]
+    retrieval_evidence_hashes: dict[str, str]
+    analysis_cache_decision: str | None
+    analysis_artifact: dict[str, Any] | None
+    presentation: dict[str, Any] | None
 
 
 def initial_research_state(
@@ -149,6 +177,14 @@ def initial_research_state(
         orchestration_stage=RunStage.CREATED.value,
         reporting_status=None,
         query_spec=None,
+        report_request=None,
+        report_candidate_set=None,
+        report_selection=None,
+        report_facts=[],
+        report_validation_profile=None,
+        report_depth_reason=None,
+        report_content_retrieved=False,
+        report_content_missing_documents=[],
         semantic_alignment=None,
         execution_metadata={"executed_at": datetime.now(timezone.utc).isoformat()},
         skill_selection=None,
@@ -175,6 +211,13 @@ def initial_research_state(
         reporting_errors=[],
         node_trace=[],
         terminal_writes=0,
+        atomic_work=[],
+        cache_summary={},
+        retrieval_snapshots={},
+        retrieval_evidence_hashes={},
+        analysis_cache_decision=None,
+        analysis_artifact=None,
+        presentation=None,
     )
 
 
@@ -387,6 +430,8 @@ class LangGraphResearchService:
         )[:12]
 
     async def aclose(self) -> None:
+        if self.tool_gateway is not None:
+            await self.tool_gateway.aclose()
         if self.business_store is not None:
             await self.business_store.close()
             self.business_store = None
@@ -402,15 +447,27 @@ class LangGraphResearchService:
         builder.add_node("load_memory", self._load_memory)
         builder.add_node("interpret", self._interpret)
         builder.add_node("align_semantics", self._align_semantics)
+        builder.add_node("resolve_report_request", self._resolve_report_request)
         builder.add_node("remember_query", self._remember_query)
         builder.add_node("select_skill", self._select_skill)
         builder.add_node("initialize_governance", self._initialize_governance)
         builder.add_node("plan", self._plan)
         builder.add_node("validate_plan", self._validate_plan)
+        builder.add_node("decompose_work", self._decompose_work)
         builder.add_node("execute_tools", self._execute_tools)
+        builder.add_node(
+            "assemble_retrieval_snapshot", self._assemble_retrieval_snapshot
+        )
         builder.add_node("build_evidence", self._build_evidence)
+        builder.add_node(
+            "validate_report_candidates", self._validate_report_candidates
+        )
+        builder.add_node("decide_report_depth", self._decide_report_depth)
+        builder.add_node("retrieve_report_content", self._retrieve_report_content)
         builder.add_node("check_evidence_sufficiency", self._check_evidence_sufficiency)
         builder.add_node("optional_replan", self._optional_replan)
+        builder.add_node("resolve_analysis_cache", self._resolve_analysis_cache)
+        builder.add_node("analyze_or_reuse", self._analyze_or_reuse)
         builder.add_node("generate_report", self._generate_report)
         builder.add_node("validate_report", self._validate_report)
         builder.add_node("revise_report", self._revise_report)
@@ -421,24 +478,52 @@ class LangGraphResearchService:
         builder.add_edge(START, "load_memory")
         self._add_failure_edge(builder, "load_memory", "interpret")
         self._add_failure_edge(builder, "interpret", "align_semantics")
-        self._add_failure_edge(builder, "align_semantics", "remember_query")
+        self._add_failure_edge(builder, "align_semantics", "resolve_report_request")
+        self._add_failure_edge(builder, "resolve_report_request", "remember_query")
         self._add_failure_edge(builder, "remember_query", "select_skill")
         self._add_failure_edge(builder, "select_skill", "initialize_governance")
         self._add_failure_edge(builder, "initialize_governance", "plan")
         self._add_failure_edge(builder, "plan", "validate_plan")
-        self._add_failure_edge(builder, "validate_plan", "execute_tools")
-        self._add_failure_edge(builder, "execute_tools", "build_evidence")
-        builder.add_edge("build_evidence", "check_evidence_sufficiency")
+        self._add_failure_edge(builder, "validate_plan", "decompose_work")
+        self._add_failure_edge(builder, "decompose_work", "execute_tools")
+        self._add_failure_edge(
+            builder, "execute_tools", "assemble_retrieval_snapshot"
+        )
+        self._add_failure_edge(
+            builder, "assemble_retrieval_snapshot", "build_evidence"
+        )
+        self._add_failure_edge(
+            builder, "build_evidence", "validate_report_candidates"
+        )
+        self._add_failure_edge(
+            builder, "validate_report_candidates", "decide_report_depth"
+        )
+        builder.add_conditional_edges(
+            "decide_report_depth",
+            self._route_after_report_depth,
+            {
+                "content": "retrieve_report_content",
+                "continue": "check_evidence_sufficiency",
+                "finalize": "completion_check",
+            },
+        )
+        self._add_failure_edge(
+            builder, "retrieve_report_content", "assemble_retrieval_snapshot"
+        )
         builder.add_conditional_edges(
             "check_evidence_sufficiency",
             self._route_after_evidence_sufficiency,
             {
                 "replan": "optional_replan",
-                "report": "generate_report",
+                "report": "resolve_analysis_cache",
                 "finalize": "completion_check",
             },
         )
         self._add_failure_edge(builder, "optional_replan", "execute_tools")
+        self._add_failure_edge(
+            builder, "resolve_analysis_cache", "analyze_or_reuse"
+        )
+        self._add_failure_edge(builder, "analyze_or_reuse", "generate_report")
         builder.add_conditional_edges(
             "generate_report",
             self._route_after_generation,
@@ -793,6 +878,42 @@ class LangGraphResearchService:
             update = self._orchestration_failure(state, "remember_query", started, exc)
         return await self._finish_node(attempt_id, update)
 
+    async def _resolve_report_request(
+        self, state: ResearchGraphState
+    ) -> ResearchGraphState:
+        attempt_id, cancelled = await self._start_node(
+            state, "resolve_report_request"
+        )
+        if cancelled is not None:
+            return cancelled
+        started = time.perf_counter()
+        try:
+            query = QuerySpec.model_validate(state["query_spec"])
+            request = query.report_request
+            update = self._orchestration_update(
+                state,
+                "resolve_report_request",
+                RunStage.INTERPRETING,
+                started,
+                report_request=(
+                    request.model_dump(mode="json") if request is not None else None
+                ),
+                report_validation_profile=(
+                    None
+                    if request is None
+                    else (
+                        ReportValidationProfile.REPORT_ANALYSIS.value
+                        if request.mode == "deep"
+                        else ReportValidationProfile.CANDIDATE_LISTING.value
+                    )
+                ),
+            )
+        except Exception as exc:
+            update = self._orchestration_failure(
+                state, "resolve_report_request", started, exc
+            )
+        return await self._finish_node(attempt_id, update)
+
     async def _select_skill(self, state: ResearchGraphState) -> ResearchGraphState:
         attempt_id, cancelled = await self._start_node(state, "select_skill")
         if cancelled is not None:
@@ -1051,6 +1172,51 @@ class LangGraphResearchService:
             update = self._orchestration_failure(state, "validate_plan", started, exc)
         return await self._finish_node(attempt_id, update)
 
+    async def _decompose_work(self, state: ResearchGraphState) -> ResearchGraphState:
+        attempt_id, cancelled = await self._start_node(state, "decompose_work")
+        if cancelled is not None:
+            return cancelled
+        started = time.perf_counter()
+        try:
+            plan_payload = (
+                state.get("supplemental_plan")
+                if state.get("replan_count", 0) > 0 and state.get("supplemental_plan")
+                else state["plan"]
+            )
+            plan = AnalysisPlan.model_validate(plan_payload)
+            work = []
+            for task in plan.tasks:
+                tool = self.orchestration.registry.get(task.tool_name.value)
+                key = atomic_key_for_task(
+                    task,
+                    plan.query,
+                    domain=tool.definition.data_domain,
+                    tenant_id=state.get("tenant_id", "local"),
+                    policy_version=(
+                        f"{self.settings.policy_version}:{tool.definition.version}"
+                    ),
+                )
+                work.append(
+                    {
+                        "task_id": task.task_id,
+                        "tool_name": task.tool_name.value,
+                        "stock_code": key.stock_code,
+                        "domain": key.domain,
+                        "key_hash": key.cache_key,
+                        "visibility": key.visibility.value,
+                    }
+                )
+            update = self._orchestration_update(
+                state,
+                "decompose_work",
+                RunStage.VALIDATING_PLAN,
+                started,
+                atomic_work=[*state.get("atomic_work", []), *work],
+            )
+        except Exception as exc:
+            update = self._orchestration_failure(state, "decompose_work", started, exc)
+        return await self._finish_node(attempt_id, update)
+
     async def _execute_tools(self, state: ResearchGraphState) -> ResearchGraphState:
         attempt_id, cancelled = await self._start_node(state, "execute_tools")
         if cancelled is not None:
@@ -1112,6 +1278,71 @@ class LangGraphResearchService:
             update = self._orchestration_failure(state, "execute_tools", started, exc)
         return await self._finish_node(attempt_id, update)
 
+    async def _assemble_retrieval_snapshot(
+        self, state: ResearchGraphState
+    ) -> ResearchGraphState:
+        attempt_id, cancelled = await self._start_node(
+            state, "assemble_retrieval_snapshot"
+        )
+        if cancelled is not None:
+            return cancelled
+        started = time.perf_counter()
+        try:
+            decisions: dict[str, int] = {}
+            snapshots = dict(state.get("retrieval_snapshots", {}))
+            evidence_hashes = dict(state.get("retrieval_evidence_hashes", {}))
+            refresh_performed = False
+            for item in state.get("tool_results", []):
+                metadata = item.get("metadata") or {}
+                decision = metadata.get("cache_decision") or "uncached"
+                decisions[decision] = decisions.get(decision, 0) + 1
+                snapshot_id = metadata.get("retrieval_snapshot_id")
+                if snapshot_id:
+                    snapshots[item["task_id"]] = snapshot_id
+                    if metadata.get("retrieval_evidence_hash"):
+                        evidence_hashes[snapshot_id] = metadata[
+                            "retrieval_evidence_hash"
+                        ]
+                refresh_performed = refresh_performed or bool(
+                    metadata.get("refresh_performed")
+                )
+            saved = sum(
+                decisions.get(name, 0) for name in ("fresh", "inflight")
+            )
+            cached_count = sum(
+                decisions.get(name, 0)
+                for name in ("fresh", "inflight", "stale")
+            )
+            overall = (
+                CacheDecision.PARTIAL.value
+                if cached_count and cached_count < sum(decisions.values())
+                else (
+                    next(iter(decisions))
+                    if len(decisions) == 1
+                    else "mixed"
+                )
+            )
+            update = self._orchestration_update(
+                state,
+                "assemble_retrieval_snapshot",
+                RunStage.EXECUTING,
+                started,
+                retrieval_snapshots=snapshots,
+                retrieval_evidence_hashes=evidence_hashes,
+                cache_summary={
+                    "decisions": decisions,
+                    "overall": overall,
+                    "external_calls_saved": saved,
+                    "refresh_performed": refresh_performed,
+                    "work_units": len(state.get("atomic_work", [])),
+                },
+            )
+        except Exception as exc:
+            update = self._orchestration_failure(
+                state, "assemble_retrieval_snapshot", started, exc
+            )
+        return await self._finish_node(attempt_id, update)
+
     async def _build_evidence(self, state: ResearchGraphState) -> ResearchGraphState:
         attempt_id, cancelled = await self._start_node(state, "build_evidence")
         if cancelled is not None:
@@ -1162,6 +1393,370 @@ class LangGraphResearchService:
             if evidence_budget is not None:
                 await self.governance_store.release(evidence_budget.entry_id)
             update = self._orchestration_failure(state, "build_evidence", started, exc)
+        return await self._finish_node(attempt_id, update)
+
+    async def _decide_report_depth(
+        self, state: ResearchGraphState
+    ) -> ResearchGraphState:
+        attempt_id, cancelled = await self._start_node(
+            state, "decide_report_depth"
+        )
+        if cancelled is not None:
+            return cancelled
+        started = time.perf_counter()
+        try:
+            query = QuerySpec.model_validate(state["query_spec"])
+            request = query.report_request
+            candidate_evidence = sorted(
+                (
+                    Evidence.model_validate(item)
+                    for item in state.get("evidence", [])
+                    if item.get("evidence_type") == "report_candidate"
+                ),
+                key=lambda item: int(item.data.get("rank") or 99),
+            )
+            candidate_payloads = [dict(item.data) for item in candidate_evidence]
+            candidate_set = None
+            if candidate_payloads:
+                first = candidate_payloads[0]
+                candidate_set = {
+                    "candidate_set_id": first["candidate_set_id"],
+                    "requested_start_date": first.get("requested_start_date"),
+                    "requested_end_date": first.get("requested_end_date"),
+                    "applied_start_date": first.get("applied_start_date"),
+                    "applied_end_date": first.get("applied_end_date"),
+                    "window_expanded": first.get("window_expanded", False),
+                    "coverage_status": first.get("coverage_status", "limited"),
+                    "candidates": candidate_payloads,
+                }
+            memory_warnings = list(state.get("memory_warnings", []))
+            memory_context = list(state.get("memory_context", []))
+            if (
+                candidate_payloads
+                and self.memory_manager is not None
+                and not state.get("report_content_retrieved", False)
+            ):
+                try:
+                    await self.memory_manager.remember_report_candidates(
+                        self._memory_scope(state),
+                        candidate_payloads,
+                        run_id=state["run_id"],
+                    )
+                    records = await self.memory_manager.list(
+                        self._memory_scope(state), audit_read=False
+                    )
+                    memory_context = [
+                        item.model_dump(mode="json") for item in records
+                    ]
+                except Exception as exc:
+                    memory_warnings.append(
+                        "REPORT_CANDIDATE_MEMORY_SKIPPED:"
+                        f"{type(exc).__name__}"
+                    )
+
+            report_selection = state.get("report_selection")
+            report_facts = list(state.get("report_facts", []))
+            depth_reason = "report_domain_not_requested"
+            if request is not None:
+                depth_reason = (
+                    "candidate_listing_requested"
+                    if request.mode == "candidate_only"
+                    else "deep_report_analysis_requested"
+                )
+                if (
+                    request.mode == "deep"
+                    and candidate_payloads
+                    and report_selection is None
+                ):
+                    report_selection = self._select_report_candidates(
+                        request,
+                        candidate_set_id=str(
+                            candidate_set["candidate_set_id"]
+                        ),
+                        candidates=candidate_payloads,
+                    ).model_dump(mode="json")
+                if (
+                    request.mode == "deep"
+                    and state.get("report_content_retrieved", False)
+                ):
+                    content_evidence = [
+                        Evidence.model_validate(item)
+                        for item in state.get("evidence", [])
+                        if item.get("evidence_type") == "research_report"
+                    ]
+                    report_facts = [
+                        item.model_dump(mode="json")
+                        for item in ReportFactExtractor().extract(
+                            content_evidence,
+                            topics=request.deep_topics,
+                        )
+                    ]
+            update = self._orchestration_update(
+                state,
+                "decide_report_depth",
+                RunStage.CHECKING_EVIDENCE,
+                started,
+                report_candidate_set=candidate_set,
+                report_selection=report_selection,
+                report_facts=report_facts,
+                report_depth_reason=depth_reason,
+                memory_context=memory_context,
+                memory_warnings=memory_warnings,
+            )
+        except Exception as exc:
+            update = self._orchestration_failure(
+                state, "decide_report_depth", started, exc
+            )
+        return await self._finish_node(attempt_id, update)
+
+    async def _validate_report_candidates(
+        self, state: ResearchGraphState
+    ) -> ResearchGraphState:
+        attempt_id, cancelled = await self._start_node(
+            state, "validate_report_candidates"
+        )
+        if cancelled is not None:
+            return cancelled
+        started = time.perf_counter()
+        try:
+            request = state.get("report_request")
+            if request is None:
+                candidate_set = None
+            else:
+                candidate_items = [
+                    Evidence.model_validate(item)
+                    for item in state.get("evidence", [])
+                    if item.get("evidence_type") == "report_candidate"
+                ]
+                candidates = sorted(
+                    (dict(item.data) for item in candidate_items),
+                    key=lambda item: int(item.get("rank") or 99),
+                )
+                candidate_set = None
+                if candidates:
+                    set_ids = {
+                        str(item.get("candidate_set_id") or "")
+                        for item in candidates
+                    }
+                    documents = [str(item.get("document_id") or "") for item in candidates]
+                    candidate_ids = [
+                        str(item.get("candidate_id") or "") for item in candidates
+                    ]
+                    if len(set_ids) != 1 or "" in set_ids:
+                        raise ValueError("REPORT_CANDIDATE_SET_MISMATCH")
+                    if len(documents) != len(set(documents)):
+                        raise ValueError("REPORT_CANDIDATE_DOCUMENT_DUPLICATE")
+                    if len(candidate_ids) != len(set(candidate_ids)):
+                        raise ValueError("REPORT_CANDIDATE_ID_DUPLICATE")
+                    if len(candidates) > int(request.get("candidate_top_k") or 5):
+                        raise ValueError("REPORT_CANDIDATE_LIMIT_EXCEEDED")
+                    first = candidates[0]
+                    applied_start = first.get("applied_start_date")
+                    applied_end = first.get("applied_end_date")
+                    for item in candidates:
+                        if item.get("stock_code") not in QuerySpec.model_validate(
+                            state["query_spec"]
+                        ).stock_codes:
+                            raise ValueError("REPORT_CANDIDATE_STOCK_MISMATCH")
+                        if "source_path" in item:
+                            raise ValueError("REPORT_CANDIDATE_PATH_EXPOSED")
+                        report_date = item.get("report_date")
+                        if (
+                            report_date
+                            and applied_start
+                            and applied_end
+                            and not str(applied_start) <= str(report_date) <= str(applied_end)
+                        ):
+                            raise ValueError("REPORT_CANDIDATE_DATE_OUT_OF_WINDOW")
+                    if any(
+                        "source_path" in item.source.metadata
+                        for item in candidate_items
+                    ):
+                        raise ValueError("REPORT_CANDIDATE_PATH_EXPOSED")
+                    candidate_set = {
+                        "candidate_set_id": next(iter(set_ids)),
+                        "requested_start_date": first.get("requested_start_date"),
+                        "requested_end_date": first.get("requested_end_date"),
+                        "applied_start_date": applied_start,
+                        "applied_end_date": applied_end,
+                        "window_expanded": first.get("window_expanded", False),
+                        "coverage_status": first.get("coverage_status", "limited"),
+                        "candidates": candidates,
+                    }
+            update = self._orchestration_update(
+                state,
+                "validate_report_candidates",
+                RunStage.CHECKING_EVIDENCE,
+                started,
+                report_candidate_set=candidate_set,
+            )
+        except Exception as exc:
+            update = self._orchestration_failure(
+                state, "validate_report_candidates", started, exc
+            )
+        return await self._finish_node(attempt_id, update)
+
+    @staticmethod
+    def _select_report_candidates(
+        request: ReportAnalysisRequest,
+        *,
+        candidate_set_id: str,
+        candidates: list[dict[str, Any]],
+    ) -> ReportSelection:
+        by_id = {str(item["candidate_id"]): item for item in candidates}
+        selected: list[dict[str, Any]] = []
+        source = "deterministic_policy"
+        reason = "rank_recency_and_institution_diversity"
+        if request.candidate_ids:
+            missing = sorted(set(request.candidate_ids) - set(by_id))
+            if missing:
+                raise ValueError(
+                    "REPORT_SELECTION_OUTSIDE_CANDIDATE_SET:"
+                    + ",".join(missing)
+                )
+            selected = [by_id[item] for item in request.candidate_ids]
+            source = "user"
+            reason = "explicit_candidate_ids"
+        elif request.candidate_ordinal:
+            index = request.candidate_ordinal - 1
+            if index >= len(candidates):
+                raise ValueError("REPORT_SELECTION_ORDINAL_OUT_OF_RANGE")
+            selected = [candidates[index]]
+            source = "user"
+            reason = "explicit_candidate_ordinal"
+        else:
+            seen_institutions: set[str] = set()
+            for item in candidates:
+                institution = str(item.get("institution") or "")
+                if institution and institution in seen_institutions:
+                    continue
+                selected.append(item)
+                seen_institutions.add(institution)
+                if len(selected) >= request.max_deep_documents:
+                    break
+            if len(selected) < request.max_deep_documents:
+                selected_ids = {item["candidate_id"] for item in selected}
+                selected.extend(
+                    item
+                    for item in candidates
+                    if item["candidate_id"] not in selected_ids
+                )
+                selected = selected[: request.max_deep_documents]
+        if not selected:
+            raise ValueError("REPORT_SELECTION_EMPTY")
+        if len(selected) > request.max_deep_documents:
+            raise ValueError("REPORT_SELECTION_LIMIT_EXCEEDED")
+        return ReportSelection(
+            candidate_set_id=candidate_set_id,
+            candidate_ids=[str(item["candidate_id"]) for item in selected],
+            document_ids=[str(item["document_id"]) for item in selected],
+            selection_source=source,
+            selection_reason=reason,
+        )
+
+    async def _retrieve_report_content(
+        self, state: ResearchGraphState
+    ) -> ResearchGraphState:
+        attempt_id, cancelled = await self._start_node(
+            state, "retrieve_report_content"
+        )
+        if cancelled is not None:
+            return cancelled
+        started = time.perf_counter()
+        try:
+            query = QuerySpec.model_validate(state["query_spec"])
+            selection = ReportSelection.model_validate(state["report_selection"])
+            task = AnalysisTask(
+                task_id="report_content",
+                tool_name=ToolName.REPORT_CONTENT_SEARCH,
+                arguments={
+                    "stock_code": query.stock_codes[0],
+                    "query": state.get("resolved_question") or state["question"],
+                    "candidate_ids": selection.candidate_ids,
+                    "document_ids": selection.document_ids,
+                    "top_k_per_document": 3,
+                },
+            )
+            plan = AnalysisPlan(
+                query=query,
+                tasks=[task],
+                expected_sections=[query.intent.value],
+            )
+            skill_selection = SkillSelection.model_validate(
+                state["skill_selection"]
+            )
+            self.skill_registry.validate_plan(
+                skill_selection, [ToolName.REPORT_CONTENT_SEARCH.value]
+            )
+            tool_messages: list[dict[str, Any]] = []
+            if self.tool_gateway is not None:
+                if self.settings.agent_framework == "langchain":
+                    results, tool_messages = (
+                        await self.tool_gateway.execute_with_messages(
+                            run_id=state["run_id"],
+                            plan=plan,
+                            selection=skill_selection,
+                        )
+                    )
+                else:
+                    results = await self.tool_gateway.execute(
+                        run_id=state["run_id"],
+                        plan=plan,
+                        selection=skill_selection,
+                    )
+            elif self.business_store is None:
+                results = await self.orchestration.executor.execute(plan)
+            else:
+                from financial_research_agent.persistence.executor import (
+                    PersistentPlanExecutor,
+                )
+
+                results = await PersistentPlanExecutor(
+                    self.orchestration.executor, self.business_store
+                ).execute(state["run_id"], plan)
+            tool_errors = [
+                f"{item.task_id}:{item.error_code}:{item.error_message}"
+                for item in results
+                if not item.success
+            ]
+            retrieved_documents = {
+                str(evidence.data.get("document_id") or "")
+                for result in results
+                if result.success
+                for evidence in result.evidence
+                if evidence.evidence_type == "research_report"
+            }
+            missing_documents = sorted(
+                set(selection.document_ids) - retrieved_documents
+            )
+            memory_warnings = list(state.get("memory_warnings", []))
+            if missing_documents:
+                memory_warnings.append(
+                    "REPORT_CONTENT_PARTIAL:" + ",".join(missing_documents)
+                )
+            update = self._orchestration_update(
+                state,
+                "retrieve_report_content",
+                RunStage.EXECUTING,
+                started,
+                tool_results=[
+                    *state.get("tool_results", []),
+                    *[item.model_dump(mode="json") for item in results],
+                ],
+                messages=[*state.get("messages", []), *tool_messages],
+                errors=[*state.get("errors", []), *tool_errors],
+                memory_warnings=memory_warnings,
+                action_hashes=[
+                    *state.get("action_hashes", []),
+                    self._action_hash(task),
+                ],
+                report_content_retrieved=True,
+                report_content_missing_documents=missing_documents,
+            )
+        except Exception as exc:
+            update = self._orchestration_failure(
+                state, "retrieve_report_content", started, exc
+            )
         return await self._finish_node(attempt_id, update)
 
     async def _check_evidence_sufficiency(
@@ -1309,6 +1904,204 @@ class LangGraphResearchService:
             update = self._orchestration_failure(state, "optional_replan", started, exc)
         return await self._finish_node(attempt_id, update)
 
+    def _analysis_identity(self, state: ResearchGraphState) -> tuple[str, dict[str, str]]:
+        dependencies = {
+            snapshot_id: state.get("retrieval_evidence_hashes", {}).get(
+                snapshot_id, canonical
+            )
+            for task_id, snapshot_id in state.get("retrieval_snapshots", {}).items()
+            for canonical in [
+                hashlib.sha256(
+                    json.dumps(
+                        [
+                            item
+                            for item in state.get("evidence", [])
+                            if item.get("subject")
+                            in {
+                                work.get("stock_code")
+                                for work in state.get("atomic_work", [])
+                                if work.get("task_id") == task_id
+                            }
+                        ],
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        default=str,
+                    ).encode("utf-8")
+                ).hexdigest()
+            ]
+        }
+        selection = SkillSelection.model_validate(state["skill_selection"])
+        query = QuerySpec.model_validate(state["query_spec"])
+        private = any(
+            item.get("visibility") == ArtifactVisibility.TENANT.value
+            for item in state.get("atomic_work", [])
+        )
+        visibility_scope = (
+            f"tenant:{state.get('tenant_id', 'local')}" if private else "public"
+        )
+        return (
+            build_analysis_key(
+                analysis_type=f"{query.intent.value}_evidence_bundle_v1",
+                subjects=query.stock_codes,
+                snapshot_dependencies=dependencies,
+                skill_versions=selection.selected_ids,
+                model_id=self.settings.model_name,
+                prompt_version=self.settings.report_prompt_version,
+                policy_version=f"{self.settings.policy_version}:{visibility_scope}",
+            ),
+            dependencies,
+        )
+
+    async def _resolve_analysis_cache(
+        self, state: ResearchGraphState
+    ) -> ResearchGraphState:
+        attempt_id, cancelled = await self._start_node(
+            state, "resolve_analysis_cache"
+        )
+        if cancelled is not None:
+            return cancelled
+        started = time.perf_counter()
+        try:
+            key, _ = self._analysis_identity(state)
+            coordinator = getattr(self.tool_gateway, "retrieval", None)
+            artifact = (
+                await coordinator.get_analysis(key) if coordinator is not None else None
+            )
+            update = self._orchestration_update(
+                state,
+                "resolve_analysis_cache",
+                RunStage.BUILDING_EVIDENCE,
+                started,
+                analysis_cache_decision=(
+                    CacheDecision.FRESH.value if artifact else CacheDecision.MISS.value
+                ),
+                analysis_artifact=(
+                    artifact.model_dump(mode="json") if artifact else None
+                ),
+            )
+        except Exception as exc:
+            update = self._orchestration_failure(
+                state, "resolve_analysis_cache", started, exc
+            )
+        return await self._finish_node(attempt_id, update)
+
+    async def _analyze_or_reuse(
+        self, state: ResearchGraphState
+    ) -> ResearchGraphState:
+        attempt_id, cancelled = await self._start_node(state, "analyze_or_reuse")
+        if cancelled is not None:
+            return cancelled
+        started = time.perf_counter()
+        try:
+            artifact_payload = state.get("analysis_artifact")
+            if artifact_payload is None:
+                from datetime import timedelta
+
+                query = QuerySpec.model_validate(state["query_spec"])
+                selection = SkillSelection.model_validate(state["skill_selection"])
+                key, dependencies = self._analysis_identity(state)
+                evidence_ids = {
+                    item["evidence_id"] for item in state.get("evidence", [])
+                }
+                stable_evidence_ids = {
+                    item["evidence_id"]: (
+                        (item.get("source") or {})
+                        .get("metadata", {})
+                        .get("original_evidence_id", item["evidence_id"])
+                    )
+                    for item in state.get("evidence", [])
+                }
+                facts = [
+                    ReportFact.model_validate(item)
+                    for item in state.get("report_facts", [])
+                ]
+                validated = bool(evidence_ids) and bool(dependencies) and all(
+                    fact.evidence_id in evidence_ids for fact in facts
+                )
+                artifact = AnalysisArtifact(
+                    artifact_id=uuid4().hex,
+                    analysis_key=key,
+                    analysis_type=f"{query.intent.value}_evidence_bundle_v1",
+                    subjects=query.stock_codes,
+                    snapshot_dependencies=dependencies,
+                    skill_versions=selection.selected_ids,
+                    model_id=self.settings.model_name,
+                    prompt_version=self.settings.report_prompt_version,
+                    policy_version=(
+                        f"{self.settings.policy_version}:"
+                        + (
+                            f"tenant:{state.get('tenant_id', 'local')}"
+                            if any(
+                                item.get("visibility")
+                                == ArtifactVisibility.TENANT.value
+                                for item in state.get("atomic_work", [])
+                            )
+                            else "public"
+                        )
+                    ),
+                    payload={
+                        "evidence_ids": sorted(stable_evidence_ids.values()),
+                        "report_facts": [
+                            item.model_copy(
+                                update={
+                                    "evidence_id": stable_evidence_ids.get(
+                                        item.evidence_id, item.evidence_id
+                                    )
+                                }
+                            ).model_dump(mode="json")
+                            for item in facts
+                        ],
+                        "historical_only": True,
+                    },
+                    validated=validated,
+                    visibility=(
+                        ArtifactVisibility.TENANT
+                        if any(
+                            item.get("visibility")
+                            == ArtifactVisibility.TENANT.value
+                            for item in state.get("atomic_work", [])
+                        )
+                        else ArtifactVisibility.PUBLIC
+                    ),
+                    tenant_id=(
+                        state.get("tenant_id", "local")
+                        if any(
+                            item.get("visibility")
+                            == ArtifactVisibility.TENANT.value
+                            for item in state.get("atomic_work", [])
+                        )
+                        else None
+                    ),
+                    expires_at=datetime.now(timezone.utc)
+                    + timedelta(
+                        seconds=(
+                            self.settings.web_analysis_cache_ttl_seconds
+                            if query.intent.value == "event"
+                            else self.settings.analysis_cache_ttl_seconds
+                        )
+                    ),
+                )
+                coordinator = getattr(self.tool_gateway, "retrieval", None)
+                if coordinator is not None and artifact.validated:
+                    await coordinator.put_analysis(artifact)
+                artifact_payload = artifact.model_dump(mode="json")
+            update = self._orchestration_update(
+                state,
+                "analyze_or_reuse",
+                RunStage.BUILDING_EVIDENCE,
+                started,
+                analysis_artifact=artifact_payload,
+                cache_summary={
+                    **state.get("cache_summary", {}),
+                    "analysis": state.get("analysis_cache_decision") or "miss",
+                },
+            )
+        except Exception as exc:
+            update = self._orchestration_failure(
+                state, "analyze_or_reuse", started, exc
+            )
+        return await self._finish_node(attempt_id, update)
+
     async def _generate_report(self, state: ResearchGraphState) -> ResearchGraphState:
         attempt_id, cancelled = await self._start_node(state, "generate_report", report_node=True)
         if cancelled is not None:
@@ -1322,6 +2115,10 @@ class LangGraphResearchService:
             manifests = dict(state.get("context_manifests", {}))
             context_manifest_id = None
             if self.context_builder is not None:
+                report_facts = [
+                    ReportFact.model_validate(item)
+                    for item in state.get("report_facts", [])
+                ]
                 built = await self._build_context(
                     "build_report",
                     run_id=state["run_id"],
@@ -1334,6 +2131,8 @@ class LangGraphResearchService:
                         for item in state.get("memory_context", [])
                     ],
                     knowledge=list(state.get("knowledge_context", [])),
+                    report_facts=report_facts,
+                    report_workflow=self._report_workflow_context(state),
                 )
                 report_context = built.payload
                 manifests = await self._record_context_manifest(state, built)
@@ -1343,6 +2142,11 @@ class LangGraphResearchService:
                     query,
                     evidence,
                     self.settings.max_report_context_chars,
+                    report_facts=[
+                        ReportFact.model_validate(item)
+                        for item in state.get("report_facts", [])
+                    ],
+                    report_workflow=self._report_workflow_context(state),
                 )
             if self.model_gateway is not None:
                 raw = await self.model_gateway.create_report(
@@ -1423,6 +2227,12 @@ class LangGraphResearchService:
                 QuerySpec.model_validate(state["query_spec"]),
                 [Evidence.model_validate(item) for item in state["evidence"]],
                 state["run_id"],
+                report_facts=[
+                    ReportFact.model_validate(item)
+                    for item in state.get("report_facts", [])
+                ],
+                validation_profile=state.get("report_validation_profile"),
+                selected_document_ids=self._selected_document_ids(state),
             )
             status = (
                 "completed"
@@ -1471,6 +2281,10 @@ class LangGraphResearchService:
             manifests = dict(state.get("context_manifests", {}))
             context_manifest_id = None
             if self.context_builder is not None:
+                report_facts = [
+                    ReportFact.model_validate(item)
+                    for item in state.get("report_facts", [])
+                ]
                 built = await self._build_context(
                     "build_report",
                     run_id=state["run_id"],
@@ -1485,6 +2299,8 @@ class LangGraphResearchService:
                     draft=draft.model_dump(mode="json"),
                     validation_errors=validation.errors,
                     knowledge=list(state.get("knowledge_context", [])),
+                    report_facts=report_facts,
+                    report_workflow=self._report_workflow_context(state),
                 )
                 report_context = built.payload
                 manifests = await self._record_context_manifest(state, built)
@@ -1494,6 +2310,11 @@ class LangGraphResearchService:
                     query,
                     evidence,
                     self.settings.max_report_context_chars,
+                    report_facts=[
+                        ReportFact.model_validate(item)
+                        for item in state.get("report_facts", [])
+                    ],
+                    report_workflow=self._report_workflow_context(state),
                 )
             if self.governance_store is not None:
                 revision_budget = await self.governance_store.reserve(
@@ -1599,6 +2420,12 @@ class LangGraphResearchService:
                 QuerySpec.model_validate(state["query_spec"]),
                 [Evidence.model_validate(item) for item in state["evidence"]],
                 state["run_id"],
+                report_facts=[
+                    ReportFact.model_validate(item)
+                    for item in state.get("report_facts", [])
+                ],
+                validation_profile=state.get("report_validation_profile"),
+                selected_document_ids=self._selected_document_ids(state),
             )
             update = ResearchGraphState(
                 final_report=report.model_dump(mode="json"),
@@ -1660,6 +2487,61 @@ class LangGraphResearchService:
         if sufficiency.get("replan_allowed"):
             return "replan"
         return "report" if sufficiency.get("passed") else "finalize"
+
+    @staticmethod
+    def _route_after_report_depth(state: ResearchGraphState) -> str:
+        if state.get("orchestration_stage") == RunStage.FAILED.value:
+            return "finalize"
+        request = state.get("report_request") or {}
+        if (
+            request.get("mode") == "deep"
+            and state.get("report_selection")
+            and not state.get("report_content_retrieved", False)
+        ):
+            return "content"
+        return "continue"
+
+    @staticmethod
+    def _selected_document_ids(state: ResearchGraphState) -> set[str]:
+        selection = state.get("report_selection") or {}
+        return {str(item) for item in selection.get("document_ids") or []}
+
+    @staticmethod
+    def _report_workflow_context(
+        state: ResearchGraphState,
+    ) -> dict[str, Any] | None:
+        request = state.get("report_request")
+        candidate_set = state.get("report_candidate_set") or {}
+        selection = state.get("report_selection") or {}
+        if request is None:
+            return None
+        return {
+            "validation_profile": state.get("report_validation_profile"),
+            "mode": request.get("mode"),
+            "candidate_set_id": candidate_set.get("candidate_set_id"),
+            "requested_start_date": candidate_set.get("requested_start_date"),
+            "requested_end_date": candidate_set.get("requested_end_date"),
+            "applied_start_date": candidate_set.get("applied_start_date"),
+            "applied_end_date": candidate_set.get("applied_end_date"),
+            "window_expanded": candidate_set.get("window_expanded", False),
+            "coverage_status": candidate_set.get("coverage_status"),
+            "candidate_ids": [
+                item.get("candidate_id")
+                for item in candidate_set.get("candidates") or []
+            ],
+            "unknown_date_candidate_ids": [
+                item.get("candidate_id")
+                for item in candidate_set.get("candidates") or []
+                if item.get("date_unknown")
+            ],
+            "selected_candidate_ids": selection.get("candidate_ids") or [],
+            "selected_document_ids": selection.get("document_ids") or [],
+            "selection_reason": selection.get("selection_reason"),
+            "missing_document_ids": state.get(
+                "report_content_missing_documents", []
+            ),
+            "depth_reason": state.get("report_depth_reason"),
+        }
 
     @staticmethod
     def _route_after_generation(state: ResearchGraphState) -> str:
@@ -1724,6 +2606,39 @@ class LangGraphResearchService:
         update = ResearchGraphState(
             terminal_writes=1,
             memory_warnings=memory_warnings,
+            presentation=PresentationEnvelope(
+                run_id=state["run_id"],
+                tenant_id=state.get("tenant_id", "local"),
+                user_id=state.get("user_id", "local"),
+                session_id=state.get("session_id", "default"),
+                analysis_artifact_ids=(
+                    [state["analysis_artifact"]["artifact_id"]]
+                    if state.get("analysis_artifact")
+                    else []
+                ),
+                cache_decisions={
+                    item["task_id"]: CacheDecision(metadata["cache_decision"])
+                    for item in state.get("tool_results", [])
+                    for metadata in [item.get("metadata") or {}]
+                    if metadata.get("cache_decision") in {
+                        value.value for value in CacheDecision
+                    }
+                },
+                refresh_performed=bool(
+                    state.get("cache_summary", {}).get("refresh_performed")
+                ),
+                data_as_of=(state.get("execution_metadata") or {}).get("data_as_of"),
+                lineage={
+                    "retrieval_snapshots": list(
+                        state.get("retrieval_snapshots", {}).values()
+                    ),
+                    "analysis_artifacts": (
+                        [state["analysis_artifact"]["artifact_id"]]
+                        if state.get("analysis_artifact")
+                        else []
+                    ),
+                },
+            ).model_dump(mode="json"),
             node_trace=[*state.get("node_trace", []), "finalize"],
         )
         return await self._finish_node(attempt_id, update)
@@ -1886,6 +2801,16 @@ class LangGraphResearchService:
                 )
                 else None
             ),
+            report_workflow=LangGraphResearchService._report_workflow_context(
+                state
+            ),
+            report_facts=[
+                ReportFact.model_validate(item)
+                for item in state.get("report_facts", [])
+            ],
+            cache_summary=state.get("cache_summary", {}),
+            analysis_artifact=state.get("analysis_artifact"),
+            presentation=state.get("presentation"),
         )
         reporting = None
         status = state.get("reporting_status")

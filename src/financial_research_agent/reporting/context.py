@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from financial_research_agent.domain.models import Evidence, QuerySpec
+from financial_research_agent.domain.models import Evidence, QuerySpec, ReportFact
 
 
 def _compact_data(data: Any) -> Any:
@@ -19,7 +19,12 @@ def _compact_data(data: Any) -> Any:
 
 
 def build_report_context(
-    query: QuerySpec, evidence: list[Evidence], max_chars: int
+    query: QuerySpec,
+    evidence: list[Evidence],
+    max_chars: int,
+    *,
+    report_facts: list[ReportFact] | None = None,
+    report_workflow: dict[str, Any] | None = None,
 ) -> dict:
     items = [
         {
@@ -37,6 +42,12 @@ def build_report_context(
         for item in evidence
     ]
     payload = {"query": query.model_dump(mode="json"), "evidence": items}
+    if report_facts:
+        payload["report_facts"] = [
+            item.model_dump(mode="json") for item in report_facts
+        ]
+    if report_workflow:
+        payload["report_workflow"] = report_workflow
     encoded = json.dumps(payload, ensure_ascii=False)
     if len(encoded) > max_chars:
         raise ValueError(f"report context exceeds {max_chars} characters")

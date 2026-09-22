@@ -11,6 +11,7 @@ __pycache__/
 venv/
 dist/
 build/
+backend-gateway/target/
 tmp/
 *.db
 *.sqlite
@@ -28,3 +29,4 @@ artifacts/*
 *.pfx
 .cache/
 .huggingface/
+docs/security/SSH_KEY_REGISTER.md

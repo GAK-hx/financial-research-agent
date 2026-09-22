@@ -219,6 +219,31 @@ class ReportSchemaValidatorTests(unittest.TestCase):
 
         self.assertTrue(result.passed, result.errors)
 
+    def test_drawdown_window_and_decline_magnitude_are_supported(self):
+        evidence = sample_evidence()
+        evidence[0] = evidence[0].model_copy(
+            update={
+                "data": {
+                    **evidence[0].data,
+                    "max_drawdown_60d": 0.10445004712896477,
+                }
+            }
+        )
+        raw = valid_report(evidence)
+        raw["risks"][0]["risk"] = (
+            "60日最大回撤为0.1045，表明过去60天内价格曾从高点"
+            "下跌10.45%，存在下行风险。"
+        )
+
+        result = self.validator.validate(
+            ResearchReport.model_validate(raw),
+            self.query,
+            evidence,
+            RUN_ID,
+        )
+
+        self.assertTrue(result.passed, result.errors)
+
     def test_decimal_tail_is_not_misread_as_a_stock_code(self):
         raw = valid_report(self.evidence)
         raw["claims"][0]["claim"] = "贵州茅台Amihud指标为0.000560。"

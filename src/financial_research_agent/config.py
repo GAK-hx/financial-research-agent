@@ -2,7 +2,7 @@ from datetime import date
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -13,17 +13,17 @@ class Settings(BaseSettings):
     identity_mode: Literal["local", "api_key"] = "local"
     agent_api_key: str = ""
     model_provider: str = "openai_compatible"
-    model_name: str = "deepseek-v4-flash"
+    model_name: str = "deepseek-flash"
     model_api_key: str = ""
-    model_base_url: str = ""
-    model_timeout_seconds: int = Field(default=75, ge=10, le=120)
+    model_base_url: str = "https://api.deepseek.com"
+    model_timeout_seconds: int = Field(default=90, ge=10, le=120)
     model_max_retries: int = Field(default=4, ge=0, le=5)
     model_retry_backoff_seconds: float = Field(default=3.0, ge=0, le=30)
     model_retry_max_backoff_seconds: float = Field(default=20.0, ge=0, le=60)
-    model_context_window_tokens: int = Field(default=131_072, ge=8_192, le=2_000_000)
-    model_max_output_tokens: int | None = Field(default=None, ge=1, le=1_000_000)
+    model_context_window_tokens: int = Field(default=1_000_000, ge=8_192, le=2_000_000)
+    model_max_output_tokens: int | None = Field(default=384_000, ge=1, le=1_000_000)
     model_thinking_mode: Literal["disabled", "enabled", "omit"] = "disabled"
-    model_reasoning_effort: Literal["high", "max"] = "high"
+    model_reasoning_effort: Literal["low", "high", "max"] = "high"
     business_timezone: str = "Asia/Shanghai"
     agent_framework: Literal["native", "langchain"] = "langchain"
     model_input_price_cny_per_million: float | None = Field(default=None, ge=0)
@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     market_retry_max_backoff_seconds: float = Field(default=20.0, ge=0, le=120)
     milvus_host: str = "milvus"
     milvus_port: int = 19530
+    milvus_enabled: bool = True
     reports_dir: str = "/data/reports"
     rag_embedding_model: str = "BAAI/bge-small-zh-v1.5"
     rag_keyword_index_path: str = "/lake/metadata/rag_indexes/research_reports_v2.sqlite"
@@ -121,7 +122,59 @@ class Settings(BaseSettings):
     provider_shared_rate_limit_enabled: bool = False
     provider_requests_per_minute: int = Field(default=60, ge=1, le=10_000)
     provider_rate_wait_seconds: int = Field(default=30, ge=0, le=300)
+    retrieval_cache_enabled: bool = True
+    retrieval_cache_ttl_seconds: int = Field(default=3_600, ge=30, le=604_800)
+    web_retrieval_cache_ttl_seconds: int = Field(default=900, ge=30, le=86_400)
+    report_retrieval_cache_ttl_seconds: int = Field(
+        default=21_600, ge=60, le=604_800
+    )
+    structured_data_cache_ttl_seconds: int = Field(
+        default=86_400, ge=60, le=604_800
+    )
+    analysis_cache_ttl_seconds: int = Field(default=21_600, ge=60, le=2_592_000)
+    web_analysis_cache_ttl_seconds: int = Field(
+        default=1_800, ge=60, le=86_400
+    )
+    retrieval_lease_seconds: int = Field(default=180, ge=30, le=600)
+    retrieval_join_timeout_seconds: float = Field(default=210.0, ge=1, le=900)
+    retrieval_join_poll_seconds: float = Field(default=0.25, ge=0.05, le=5)
+    web_search_enabled: bool = False
+    web_search_provider: Literal["tavily", "disabled"] = "disabled"
+    web_search_api_key: str = ""
+    web_search_base_url: str = "https://api.tavily.com"
+    web_search_timeout_seconds: float = Field(default=30.0, ge=3, le=120)
+    web_search_max_retries: int = Field(default=4, ge=0, le=8)
+    web_search_max_results: int = Field(default=8, ge=1, le=12)
+    web_search_allowed_domains: str = ""
+    web_search_overlap_hours: int = Field(default=24, ge=1, le=168)
+    elasticsearch_enabled: bool = False
+    elasticsearch_url: str = "http://elasticsearch:9200"
+    elasticsearch_index_alias: str = "web_documents"
+    elasticsearch_index_name: str = "web_documents_v1"
+    elasticsearch_request_timeout_seconds: float = Field(default=15.0, ge=1, le=120)
+    redis_enabled: bool = False
+    redis_url: str = "redis://redis:6379/0"
+    redis_password: str = ""
+    redis_key_prefix: str = "financial-agent"
+    redis_connect_timeout_seconds: float = Field(default=1.0, ge=0.1, le=10)
+    redis_socket_timeout_seconds: float = Field(default=1.0, ge=0.1, le=10)
+    redis_idempotency_ttl_seconds: int = Field(default=3_600, ge=60, le=86_400)
+    redis_metadata_ttl_seconds: int = Field(default=300, ge=10, le=3_600)
+    redis_event_ttl_seconds: int = Field(default=3_600, ge=60, le=86_400)
+    redis_fail_open: bool = True
     demo_ui_enabled: bool = True
+
+    @field_validator(
+        "model_input_price_cny_per_million",
+        "model_cache_hit_price_cny_per_million",
+        "model_output_price_cny_per_million",
+        mode="before",
+    )
+    @classmethod
+    def empty_optional_price_is_none(cls, value: object) -> object:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     @property
     def stock_codes(self) -> list[str]:
@@ -133,6 +186,23 @@ class Settings(BaseSettings):
 
         universe = UniverseRegistry.builtin().get(self.analysis_universe_id)
         return list(dict.fromkeys([*self.stock_codes, *universe.members]))
+
+    @property
+    def allowed_web_domains(self) -> list[str]:
+        return [
+            item.strip().lower()
+            for item in self.web_search_allowed_domains.split(",")
+            if item.strip()
+        ]
+
+    def retrieval_ttl_for_domain(self, domain: str) -> int:
+        if domain == "public_web":
+            return self.web_retrieval_cache_ttl_seconds
+        if domain == "research_report":
+            return self.report_retrieval_cache_ttl_seconds
+        if domain in {"market", "financial", "factor"}:
+            return self.structured_data_cache_ttl_seconds
+        return self.retrieval_cache_ttl_seconds
 
 
 @lru_cache

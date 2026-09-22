@@ -27,7 +27,12 @@ from financial_research_agent.persistence.models import (
 
 PREFERENCE_SESSION_KEY = "preference"
 EPISODIC_SESSION_KEY = "episodic"
-SESSION_KEYS = {"last_stock_codes", "last_start_date", "last_end_date"}
+SESSION_KEYS = {
+    "last_stock_codes",
+    "last_start_date",
+    "last_end_date",
+    "last_report_candidates",
+}
 PREFERENCE_KEYS = {"report_language", "output_length", "risk_focus"}
 SENSITIVE_PATTERNS = (
     re.compile(r"\bsk-[A-Za-z0-9_-]{12,}\b"),
@@ -391,6 +396,44 @@ class MemoryManager:
     ) -> list[MemoryRecord]:
         return await self.list(scope, kind=kind)
 
+    async def remember_report_candidates(
+        self,
+        scope: MemoryScope,
+        candidates: list[dict[str, Any]],
+        *,
+        run_id: str,
+    ) -> MemoryRecord:
+        compact = [
+            {
+                key: item.get(key)
+                for key in (
+                    "candidate_id",
+                    "document_id",
+                    "stock_code",
+                    "institution",
+                    "report_title",
+                    "report_date",
+                    "rank",
+                    "candidate_set_id",
+                )
+            }
+            for item in candidates[:5]
+        ]
+        return await self.write(
+            scope,
+            CandidateMemory(
+                kind=MemoryKind.SESSION,
+                key="last_report_candidates",
+                value=compact,
+                source=MemorySource(
+                    source_type="query_spec",
+                    source_id=run_id,
+                    run_id=run_id,
+                ),
+                ttl_seconds=21_600,
+            ),
+        )
+
     async def update(
         self,
         scope: MemoryScope,
@@ -502,6 +545,33 @@ class MemoryManager:
     ) -> tuple[str, list[str]]:
         if re.search(r"\b\d{6}\b", question):
             return question, []
+        ordinal_match = re.search(
+            r"第\s*([1-5一二三四五])\s*(?:份|篇|个)(?:研报|报告)?",
+            question,
+        )
+        if ordinal_match:
+            raw = ordinal_match.group(1)
+            ordinal = int(raw) if raw.isdigit() else {
+                "一": 1, "二": 2, "三": 3, "四": 4, "五": 5
+            }[raw]
+            record = next(
+                (item for item in memory if item.key == "last_report_candidates"),
+                None,
+            )
+            candidates = record.value if record is not None else None
+            if isinstance(candidates, list) and len(candidates) >= ordinal:
+                selected = candidates[ordinal - 1]
+                code = str(selected.get("stock_code") or "")
+                candidate_id = str(selected.get("candidate_id") or "")
+                title = str(selected.get("report_title") or "")
+                if re.fullmatch(r"\d{6}", code) and re.fullmatch(
+                    r"rpt_[a-f0-9]{16}", candidate_id
+                ):
+                    return (
+                        f"{question}（本会话候选ID：{candidate_id}；"
+                        f"标的代码：{code}；标题：{title}）",
+                        [f"SESSION_REPORT_REFERENCE_RESOLVED:{record.memory_id}"],
+                    )
         if not any(token in question for token in ("它", "该公司", "这个标的", "继续")):
             return question, []
         record = next(
@@ -561,6 +631,18 @@ class MemoryManager:
                 and re.fullmatch(r"\d{4}-\d{2}-\d{2}", value)
             ):
                 raise MemoryRejected("MEMORY_DATE_INVALID")
+        elif candidate.key == "last_report_candidates":
+            if not (
+                isinstance(value, list)
+                and 1 <= len(value) <= 5
+                and all(
+                    isinstance(item, dict)
+                    and re.fullmatch(r"rpt_[a-f0-9]{16}", str(item.get("candidate_id", "")))
+                    and re.fullmatch(r"\d{6}", str(item.get("stock_code", "")))
+                    for item in value
+                )
+            ):
+                raise MemoryRejected("MEMORY_REPORT_CANDIDATES_INVALID")
         elif candidate.key == "report_language" and value not in {
             "zh-CN",
             "en-US",

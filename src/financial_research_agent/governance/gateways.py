@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import time
+from contextlib import suppress
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from langchain_core.messages import ToolMessage, message_to_dict
@@ -27,6 +29,10 @@ from financial_research_agent.persistence.store import (
 )
 from financial_research_agent.providers.model import OpenAICompatibleProvider
 from financial_research_agent.skills.models import SkillSelection
+from financial_research_agent.retrieval.coordinator import (
+    PostgresRetrievalCoordinator,
+    atomic_key_for_task,
+)
 
 
 def _safe_failure_code(exc: Exception) -> str:
@@ -285,6 +291,21 @@ class ToolGateway:
         self.business = business
         self.governance = governance
         self.policy = policy
+        self.retrieval = (
+            PostgresRetrievalCoordinator(
+                business.sessions,
+                settings,
+                worker_id=business.worker_id,
+            )
+            if settings.retrieval_cache_enabled
+            and hasattr(business, "sessions")
+            and hasattr(business, "worker_id")
+            else None
+        )
+
+    async def aclose(self) -> None:
+        if self.retrieval is not None:
+            await self.retrieval.aclose()
 
     async def execute(
         self,
@@ -443,6 +464,79 @@ class ToolGateway:
             query=query,
             selection=selection,
         )
+        cache_key = None
+        cache_resolution = None
+        if self.retrieval is not None:
+            run = await self.business.get_run(run_id)
+            cache_key = atomic_key_for_task(
+                task,
+                query,
+                domain=tool.definition.data_domain,
+                tenant_id=run.tenant_id if run is not None else "local",
+                policy_version=(
+                    f"{self.settings.policy_version}:{tool.definition.version}"
+                ),
+            )
+            cache_resolution = await self.retrieval.resolve(
+                cache_key,
+                run_id=run_id,
+                task_id=task.task_id,
+            )
+            snapshot = cache_resolution.snapshot
+            if cache_resolution.decision.value == "inflight":
+                snapshot = await self.retrieval.wait_for_snapshot(cache_resolution)
+                if snapshot is None:
+                    cache_resolution = await self.retrieval.resolve(
+                        cache_key,
+                        run_id=run_id,
+                        task_id=task.task_id,
+                    )
+                    snapshot = cache_resolution.snapshot
+                if (
+                    snapshot is None
+                    and cache_resolution.decision.value == "inflight"
+                ):
+                    return await self._record_cached_result(
+                        run_id=run_id,
+                        task=task,
+                        result=ToolResult(
+                            task_id=task.task_id,
+                            success=False,
+                            error_code="CACHE_JOIN_TIMEOUT",
+                            error_message="shared retrieval did not finish before the join deadline",
+                            latency_ms=int(
+                                self.settings.retrieval_join_timeout_seconds * 1000
+                            ),
+                            metadata={
+                                "cache_decision": "inflight",
+                                "refresh_performed": False,
+                            },
+                        ),
+                        decision_id=decision.decision_id,
+                    )
+            if snapshot is not None and (
+                cache_resolution.decision.value in {"fresh", "inflight"}
+            ):
+                cached_result = snapshot.result.model_copy(
+                    update={
+                        "task_id": task.task_id,
+                        "latency_ms": 0,
+                        "metadata": {
+                            **snapshot.result.metadata,
+                            "cache_decision": cache_resolution.decision.value,
+                            "retrieval_snapshot_id": snapshot.snapshot_id,
+                            "retrieval_generation": snapshot.generation,
+                            "retrieval_evidence_hash": snapshot.evidence_hash,
+                            "refresh_performed": False,
+                        },
+                    }
+                )
+                return await self._record_cached_result(
+                    run_id=run_id,
+                    task=task,
+                    result=cached_result,
+                    decision_id=decision.decision_id,
+                )
         logical_budget = await self.governance.reserve(
             run_id=run_id,
             reservation_key=f"{run_id}:execute_tools:{task.task_id}:logical",
@@ -461,16 +555,50 @@ class ToolGateway:
             budget_entry_id=logical_budget.entry_id,
         )
         if not call.execute:
+            cached = ToolResult.model_validate(call.result_payload)
+            if cache_resolution is not None and cache_key is not None:
+                if cached.success:
+                    snapshot = await self.retrieval.complete(
+                        cache_resolution,
+                        cache_key,
+                        cached,
+                        source_version=tool.definition.version,
+                        ttl_seconds=self.settings.retrieval_ttl_for_domain(
+                            tool.definition.data_domain
+                        ),
+                    )
+                    cached = cached.model_copy(
+                        update={
+                            "metadata": {
+                                **cached.metadata,
+                                "cache_decision": cache_resolution.decision.value,
+                                "retrieval_snapshot_id": snapshot.snapshot_id,
+                                "retrieval_generation": snapshot.generation,
+                                "retrieval_evidence_hash": snapshot.evidence_hash,
+                                "refresh_performed": True,
+                            }
+                        }
+                    )
+                else:
+                    await self.retrieval.fail(
+                        cache_resolution,
+                        cached.error_code or "TOOL_FAILED",
+                    )
             if logical_budget.status == "reserved":
-                cached = ToolResult.model_validate(call.result_payload)
                 if cached.success:
                     await self.governance.commit(logical_budget.entry_id)
                 else:
                     await self.governance.release(logical_budget.entry_id)
-            return ToolResult.model_validate(call.result_payload)
+            return cached
         started = time.perf_counter()
         attempts = 0
+        lease_heartbeat = None
         try:
+            served_stale = False
+            if cache_resolution is not None:
+                lease_heartbeat = asyncio.create_task(
+                    self._renew_shared_lease(cache_resolution)
+                )
             result: ToolResult | None = None
             for attempt in range(self.settings.max_tool_retries + 1):
                 attempts = attempt + 1
@@ -495,7 +623,19 @@ class ToolGateway:
                 try:
                     async with semaphore:
                         async with asyncio.timeout(tool.definition.timeout_seconds):
-                            result = await tool.execute(task.task_id, validated)
+                            incremental = getattr(tool, "execute_incremental", None)
+                            if incremental is not None and cache_resolution is not None:
+                                result = await incremental(
+                                    task.task_id,
+                                    validated,
+                                    watermark=(
+                                        cache_resolution.snapshot.watermark
+                                        if cache_resolution.snapshot
+                                        else None
+                                    ),
+                                )
+                            else:
+                                result = await tool.execute(task.task_id, validated)
                 except TimeoutError:
                     result = ToolResult(
                         task_id=task.task_id,
@@ -517,14 +657,93 @@ class ToolGateway:
                 transient = result.error_code in {
                     "SOURCE_UNAVAILABLE",
                     "REPORT_SEARCH_UNAVAILABLE",
+                    "REPORT_CONTENT_UNAVAILABLE",
                     "TOOL_TIMEOUT",
-                }
+                    "WEB_SEARCH_RATE_LIMITED",
+                    "WEB_SEARCH_TIMEOUT",
+                    "WEB_SEARCH_PROVIDER_ERROR",
+                } or bool(
+                    result.error_code
+                    and result.error_code.startswith("WEB_INDEX_UNAVAILABLE")
+                )
                 if result.success or not transient or attempt >= self.settings.max_tool_retries:
                     break
             if result is None:
                 raise RuntimeError("tool gateway produced no result")
+            requires_latest = bool(
+                query.time_scope
+                and query.time_scope.kind in {"latest_available"}
+            )
+            if (
+                not result.success
+                and cache_resolution is not None
+                and cache_resolution.snapshot is not None
+                and not requires_latest
+            ):
+                refresh_error = result.error_code or "TOOL_FAILED"
+                await self.retrieval.fail(cache_resolution, refresh_error)
+                stale = cache_resolution.snapshot
+                result = stale.result.model_copy(
+                    update={
+                        "task_id": task.task_id,
+                        "metadata": {
+                            **stale.result.metadata,
+                            "cache_decision": "stale",
+                            "retrieval_snapshot_id": stale.snapshot_id,
+                            "retrieval_generation": stale.generation,
+                            "retrieval_evidence_hash": stale.evidence_hash,
+                            "refresh_performed": False,
+                            "stale_fallback": True,
+                            "refresh_error": refresh_error,
+                        },
+                    }
+                )
+                served_stale = True
             await self.business.record_tool_attempts(call.call_id, attempt_count=attempts)
-            await self.business.complete_tool_call(call.call_id, result.model_dump(mode="json"))
+            if cache_resolution is not None and cache_key is not None:
+                if result.success and not served_stale:
+                    watermark = max(
+                        (
+                            value
+                            for value in (
+                                item.data.get("published_at")
+                                or item.data.get("fetched_at")
+                                for item in result.evidence
+                            )
+                            if isinstance(value, datetime)
+                        ),
+                        default=None,
+                    )
+                    snapshot = await self.retrieval.complete(
+                        cache_resolution,
+                        cache_key,
+                        result,
+                        source_version=tool.definition.version,
+                        ttl_seconds=self.settings.retrieval_ttl_for_domain(
+                            tool.definition.data_domain
+                        ),
+                        watermark=watermark,
+                    )
+                    result = result.model_copy(
+                        update={
+                            "metadata": {
+                                **result.metadata,
+                                "cache_decision": cache_resolution.decision.value,
+                                "retrieval_snapshot_id": snapshot.snapshot_id,
+                                "retrieval_generation": snapshot.generation,
+                                "retrieval_evidence_hash": snapshot.evidence_hash,
+                                "refresh_performed": True,
+                            }
+                        }
+                    )
+                elif not served_stale:
+                    await self.retrieval.fail(
+                        cache_resolution,
+                        result.error_code or "TOOL_FAILED",
+                    )
+            await self.business.complete_tool_call(
+                call.call_id, result.model_dump(mode="json")
+            )
             if result.success:
                 await self.governance.commit(logical_budget.entry_id)
             else:
@@ -535,3 +754,57 @@ class ToolGateway:
             await self.business.fail_tool_call(call.call_id, _safe_failure_code(exc))
             await self.governance.release(logical_budget.entry_id)
             raise
+        finally:
+            if lease_heartbeat is not None:
+                lease_heartbeat.cancel()
+                with suppress(asyncio.CancelledError):
+                    await lease_heartbeat
+
+    async def _renew_shared_lease(self, resolution) -> None:
+        interval = max(1.0, self.settings.retrieval_lease_seconds / 3)
+        while True:
+            await asyncio.sleep(interval)
+            if not await self.retrieval.renew(resolution):
+                return
+
+    async def _record_cached_result(
+        self,
+        *,
+        run_id: str,
+        task: AnalysisTask,
+        result: ToolResult,
+        decision_id: str,
+    ) -> ToolResult:
+        logical_budget = await self.governance.reserve(
+            run_id=run_id,
+            reservation_key=f"{run_id}:execute_tools:{task.task_id}:logical",
+            resource="tool_calls",
+            metadata={
+                "task_id": task.task_id,
+                "tool": task.tool_name.value,
+                "cache_decision": result.metadata.get("cache_decision"),
+            },
+        )
+        call = await self.business.reserve_tool_call(
+            run_id=run_id,
+            node_name="execute_tools",
+            task_id=task.task_id,
+            tool_name=task.tool_name.value,
+            idempotency_key=f"{run_id}:execute_tools:{task.task_id}",
+            input_payload=task.arguments,
+            gateway_version=self.settings.gateway_version,
+            policy_decision_id=decision_id,
+            budget_entry_id=logical_budget.entry_id,
+        )
+        if call.execute:
+            await self.business.record_tool_attempts(call.call_id, attempt_count=0)
+            await self.business.complete_tool_call(
+                call.call_id, result.model_dump(mode="json")
+            )
+        elif call.result_payload is not None:
+            result = ToolResult.model_validate(call.result_payload)
+        if result.success:
+            await self.governance.commit(logical_budget.entry_id)
+        else:
+            await self.governance.release(logical_budget.entry_id)
+        return result

@@ -11,7 +11,12 @@ from financial_research_agent.tools.analysis import (
     TechnicalAnalysisTool,
 )
 from financial_research_agent.tools.market import IndicatorTool, MarketQueryTool
-from financial_research_agent.tools.report_search import ReportSearchTool
+from financial_research_agent.tools.report_search import (
+    ReportCandidateSearchTool,
+    ReportContentSearchTool,
+)
+from financial_research_agent.retrieval.web import build_web_search_components
+from financial_research_agent.tools.web_search import WebSearchTool
 
 
 def build_formal_registry(settings: Settings) -> ToolRegistry:
@@ -19,11 +24,14 @@ def build_formal_registry(settings: Settings) -> ToolRegistry:
     registry.register(MarketQueryTool(settings))
     registry.register(IndicatorTool(settings))
     registry.register(FinancialQueryTool(settings))
-    registry.register(ReportSearchTool(settings))
+    registry.register(ReportCandidateSearchTool(settings))
+    registry.register(ReportContentSearchTool(settings))
     registry.register(TechnicalAnalysisTool(settings))
     registry.register(FundamentalAnalysisTool(settings))
     registry.register(FactorScreenTool(settings))
     registry.register(StockComparisonTool(settings))
+    provider, index = build_web_search_components(settings)
+    registry.register(WebSearchTool(settings, provider, index))
     return registry
 
 

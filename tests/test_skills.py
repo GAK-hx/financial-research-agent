@@ -61,7 +61,7 @@ class SkillRegistryTests(unittest.TestCase):
         self.assertRegex(active.version_id, r"^[a-z0-9_]+@\d+\.\d+\.\d+$")
 
     def test_only_active_matching_skill_is_selected(self):
-        active = self.registry.get("financial_growth_analysis@1.0.0")
+        active = self.registry.get("financial_growth_analysis@1.1.0")
         draft = active.model_copy(
             update={"version": "1.1.0", "status": SkillStatus.DRAFT}
         )
@@ -74,12 +74,16 @@ class SkillRegistryTests(unittest.TestCase):
             registry.get(draft.version_id)
 
     def test_composition_only_reduces_tools_and_uses_stricter_budget(self):
-        growth = self.registry.get("financial_growth_analysis@1.0.0")
-        concise = self.registry.get("concise_research_report@1.0.0")
+        growth = self.registry.get("financial_growth_analysis@1.1.0")
+        concise = self.registry.get("concise_research_report@1.1.0")
         selection = self.registry.compose([growth, concise], self.available)
         self.assertEqual(
             {item.value for item in selection.effective_allowed_tools},
-            {"financial_query", "report_search"},
+            {
+                "financial_query",
+                "report_candidate_search",
+                "report_content_search",
+            },
         )
         self.assertEqual(selection.workflow_constraints.max_tool_calls, 2)
         self.assertTrue(
@@ -88,8 +92,8 @@ class SkillRegistryTests(unittest.TestCase):
         )
 
     def test_conflict_and_missing_evidence_are_deterministically_rejected(self):
-        concise = self.registry.get("concise_research_report@1.0.0")
-        risk = self.registry.get("risk_focused_report@1.0.0")
+        concise = self.registry.get("concise_research_report@1.1.0")
+        risk = self.registry.get("risk_focused_report@1.1.0")
         with self.assertRaisesRegex(SkillConflict, "SKILL_CONFLICT"):
             self.registry.compose([concise, risk], self.available)
 
@@ -178,7 +182,7 @@ class SkillStoreTests(unittest.IsolatedAsyncioTestCase):
 
     def definition(self) -> SkillDefinition:
         source = SkillRegistry.from_builtin_catalog().get(
-            "financial_growth_analysis@1.0.0"
+            "financial_growth_analysis@1.1.0"
         )
         payload = source.model_dump(mode="json", exclude={"checksum"})
         payload.update(

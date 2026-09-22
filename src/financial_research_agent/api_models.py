@@ -9,6 +9,7 @@ from financial_research_agent.domain.models import (
     Evidence,
     ExecutionMetadata,
     QuerySpec,
+    ReportFact,
     ResearchReport,
     SemanticAlignmentResult,
     ValidationResult,
@@ -47,6 +48,11 @@ class ToolStatus(BaseModel):
     error_message: str | None
     latency_ms: int
     evidence_count: int
+    cache_decision: str | None = None
+    retrieval_snapshot_id: str | None = None
+    refresh_performed: bool = False
+    stale_fallback: bool = False
+    refresh_error: str | None = None
 
 
 class RuntimeMetadata(BaseModel):
@@ -76,6 +82,11 @@ class AnalyzeResponse(BaseModel):
     context_manifests: dict[str, ContextManifest] = Field(default_factory=dict)
     semantic_alignment: SemanticAlignmentResult | None = None
     execution_metadata: ExecutionMetadata | None = None
+    report_workflow: dict[str, Any] | None = None
+    report_facts: list[ReportFact] = Field(default_factory=list)
+    cache_summary: dict[str, Any] = Field(default_factory=dict)
+    analysis_artifact: dict[str, Any] | None = None
+    presentation: dict[str, Any] | None = None
     reporting_status: str | None
     query_spec: QuerySpec | None
     plan: AnalysisPlan | None

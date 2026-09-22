@@ -22,15 +22,18 @@ from financial_research_agent.persistence.models import (
     AdmissionAuditRecord,
     ContextManifestRecord,
     JobEventRecord,
+    JobWorkDependencyRecord,
     ModelCallRecord,
     NodeAttemptRecord,
     ResearchJobRecord,
     RunEventRecord,
     RunRecord,
     ToolCallRecord,
+    RetrievalWorkUnitRecord,
     TenantScheduleRecord,
 )
 from financial_research_agent.persistence.store import canonical_hash
+from financial_research_agent.shared_state import build_shared_state
 
 
 class JobConflict(RuntimeError):
@@ -101,14 +104,19 @@ class JobStore:
         worker_id: str | None = None,
         lease_seconds: int = 180,
         settings: Settings | None = None,
+        shared_state=None,
     ) -> None:
         self.engine = engine
         self.sessions = sessions
         self.worker_id = worker_id or f"job-worker-{uuid4().hex}"
         self.lease_seconds = lease_seconds
         self.settings = settings or Settings()
+        self.shared_state = shared_state or build_shared_state(self.settings)
+        self._owns_shared_state = shared_state is None
 
     async def close(self) -> None:
+        if self._owns_shared_state:
+            await self.shared_state.aclose()
         await self.engine.dispose()
 
     async def enqueue(
@@ -133,6 +141,21 @@ class JobStore:
             "queue_class": queue_class,
         }
         request_hash = canonical_hash(request)
+        hot = await self.shared_state.get_idempotency(
+            tenant_id, idempotency_key
+        )
+        if hot is not None:
+            if hot.request_hash != request_hash:
+                raise JobConflict(
+                    "IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_INPUT"
+                )
+            cached_job = await self.get(
+                hot.run_id,
+                tenant_id=tenant_id,
+                tenant_admin=True,
+            )
+            if cached_job is not None:
+                return cached_job, False
         reject_code: str | None = None
         async with self.sessions.begin() as session:
             existing = await session.scalar(
@@ -232,6 +255,17 @@ class JobStore:
                     self.settings.job_admission_retry_after_seconds
                 ),
             )
+        await self.shared_state.remember_idempotency(
+            tenant_id,
+            idempotency_key,
+            run_id=created_snapshot.run_id,
+            request_hash=request_hash,
+        )
+        await self.shared_state.publish_job_event(
+            created_snapshot.run_id,
+            "job_queued",
+            {"status": created_snapshot.status.value},
+        )
         return created_snapshot, True
 
     async def get(
@@ -503,8 +537,32 @@ class JobStore:
                 {
                     "status": status.value,
                     "success": bool(result_payload.get("success")),
+                    "cache_summary": _safe_payload(
+                        result_payload.get("cache_summary") or {}
+                    ),
+                    "refresh_performed": bool(
+                        (result_payload.get("presentation") or {}).get(
+                            "refresh_performed"
+                        )
+                    ),
+                    "data_as_of": (
+                        (result_payload.get("presentation") or {}).get(
+                            "data_as_of"
+                        )
+                    ),
+                    "artifact_lineage": (
+                        (result_payload.get("presentation") or {}).get(
+                            "lineage"
+                        )
+                        or {}
+                    ),
                 },
             )
+        await self.shared_state.publish_job_event(
+            run_id,
+            "job_terminal",
+            {"status": status.value},
+        )
 
     async def interrupt(self, run_id: str, error: str) -> None:
         now = datetime.now(timezone.utc)
@@ -527,6 +585,11 @@ class JobStore:
                 "job_interrupted",
                 {"error": error[:256]},
             )
+        await self.shared_state.publish_job_event(
+            run_id,
+            "job_interrupted",
+            {"error_code": type(error).__name__},
+        )
 
     async def request_cancel(
         self,
@@ -537,6 +600,8 @@ class JobStore:
         tenant_admin: bool = False,
     ) -> JobSnapshot:
         now = datetime.now(timezone.utc)
+        changed = False
+        snapshot: JobSnapshot
         async with self.sessions.begin() as session:
             record = await session.scalar(
                 self._scoped_job_query(
@@ -554,6 +619,7 @@ class JobStore:
                     return _snapshot(record)
                 raise JobConflict("ILLEGAL_CANCEL_TRANSITION")
             if not record.cancel_requested:
+                changed = True
                 record.cancel_requested = True
                 if status in {
                     JobStatus.QUEUED,
@@ -572,7 +638,14 @@ class JobStore:
                     {"status": record.status},
                 )
             record.updated_at = now
-            return _snapshot(record)
+            snapshot = _snapshot(record)
+        if changed:
+            await self.shared_state.publish_job_event(
+                run_id,
+                "cancel_requested",
+                {"status": snapshot.status.value},
+            )
+        return snapshot
 
     async def resume(
         self,
@@ -647,6 +720,11 @@ class JobStore:
                 ),
             )
         assert resumed is not None
+        await self.shared_state.publish_job_event(
+            run_id,
+            "job_resumed",
+            {"status": resumed.status.value},
+        )
         return resumed
 
     async def events(
@@ -854,6 +932,21 @@ class JobStore:
                     ResearchJobRecord.lease_owner.is_not(None),
                 )
             )
+            cache_rows = (
+                await session.execute(
+                    select(
+                        JobWorkDependencyRecord.cache_decision,
+                        func.count(JobWorkDependencyRecord.id),
+                    ).group_by(JobWorkDependencyRecord.cache_decision)
+                )
+            ).all()
+            cache_waiters = await session.scalar(
+                select(
+                    func.coalesce(
+                        func.sum(RetrievalWorkUnitRecord.waiter_count), 0
+                    )
+                )
+            )
         current = datetime.now(timezone.utc)
         oldest_age = (
             max(0.0, (current - oldest_queued).total_seconds())
@@ -872,6 +965,19 @@ class JobStore:
             },
             "oldest_queue_age_seconds": oldest_age,
             "active_workers": int(active_workers or 0),
+            "retrieval_cache": {
+                decision: int(count) for decision, count in cache_rows
+            },
+            "retrieval_external_calls_saved": sum(
+                int(count)
+                for decision, count in cache_rows
+                if decision in {"fresh", "inflight"}
+            ),
+            "retrieval_waiters": int(cache_waiters or 0),
+            "redis_shared_state": {
+                "enabled": int(bool(self.shared_state.enabled)),
+                **getattr(self.shared_state, "metrics", {}),
+            },
         }
 
     async def _queue_limit_code(

@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: financial-agent-config
+data:
+  IDENTITY_MODE: api_key
+  MILVUS_ENABLED: "false"
+  ELASTICSEARCH_ENABLED: "false"
+  DEMO_UI_ENABLED: "true"
+  JOB_LEASE_SECONDS: "30"

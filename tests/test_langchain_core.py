@@ -25,7 +25,10 @@ from financial_research_agent.integrations.langchain.model import (
     LangChainModelProvider,
 )
 from financial_research_agent.orchestration.registry import ToolRegistry
-from financial_research_agent.providers.model import build_model_provider
+from financial_research_agent.providers.model import (
+    StructuredOutputError,
+    build_model_provider,
+)
 from financial_research_agent.skills.registry import SkillRegistry
 from financial_research_agent.tools.base import FinancialTool, ToolDefinition
 
@@ -253,7 +256,7 @@ class LangChainCoreTests(unittest.IsolatedAsyncioTestCase):
             ["600519"],
         )
 
-    async def test_structured_output_validation_failure_is_retried(self):
+    async def test_structured_output_validation_failure_is_not_blindly_retried(self):
         plan = {
             "query": self.query.model_dump(mode="json"),
             "tasks": [
@@ -277,17 +280,15 @@ class LangChainCoreTests(unittest.IsolatedAsyncioTestCase):
         model = RetryStructuredModel(plan)
         provider._chat_model = lambda **_: model
 
-        response = await provider.create_plan_response(
-            "分析贵州茅台走势",
-            self.query,
-            [{"name": "market_query", "input_schema": {"type": "object"}}],
-        )
+        with self.assertRaises(StructuredOutputError) as caught:
+            await provider.create_plan_response(
+                "分析贵州茅台走势",
+                self.query,
+                [{"name": "market_query", "input_schema": {"type": "object"}}],
+            )
 
-        self.assertEqual(model.calls, 2)
-        self.assertEqual(
-            AnalysisPlan.model_validate(response.content).tasks[0].task_id,
-            "market",
-        )
+        self.assertEqual(model.calls, 1)
+        self.assertEqual(caught.exception.raw_output, "{}")
 
     async def test_tool_gateway_executes_structured_tool_and_returns_artifact(self):
         tool = PriceTool()

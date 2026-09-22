@@ -1,1 +1,1 @@
-{"steps":["event_search","evidence_sufficiency","optional_relaxed_keyword_search","report","validate"],"replan_limit":1}
+{"steps":["web_search","evidence_sufficiency","optional_general_search","report","validate"],"replan_limit":1}

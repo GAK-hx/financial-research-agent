@@ -1,0 +1,263 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-migrate
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: db-migrate
+    spec:
+      serviceAccountName: financial-agent-runtime
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: migrate
+          image: financial-research-agent-db-migrate:latest
+          imagePullPolicy: IfNotPresent
+          command: [alembic, upgrade, head]
+          envFrom:
+            - configMapRef: {name: financial-agent-config}
+            - secretRef: {name: financial-agent-secrets}
+          securityContext: &restricted
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 384Mi}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 256Mi}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: job-api
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  selector:
+    matchLabels: {app.kubernetes.io/name: job-api}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: job-api}
+    spec:
+      serviceAccountName: financial-agent-runtime
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: api
+          image: financial-research-agent-job-api:latest
+          imagePullPolicy: IfNotPresent
+          ports: [{name: http, containerPort: 8000}]
+          envFrom:
+            - configMapRef: {name: financial-agent-config}
+            - secretRef: {name: financial-agent-secrets}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          startupProbe: &apiProbe
+            httpGet: {path: /health, port: http}
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            <<: *apiProbe
+            failureThreshold: 3
+          livenessProbe:
+            <<: *apiProbe
+            periodSeconds: 15
+            failureThreshold: 4
+          resources:
+            requests: {cpu: 250m, memory: 512Mi}
+            limits: {cpu: "2", memory: 2Gi}
+          volumeMounts:
+            - {name: lake, mountPath: /lake}
+            - {name: artifacts, mountPath: /artifacts}
+            - {name: reports, mountPath: /data/reports, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: lake
+          persistentVolumeClaim: {claimName: agent-lake}
+        - name: artifacts
+          emptyDir: {sizeLimit: 1Gi}
+        - name: reports
+          emptyDir: {sizeLimit: 1Gi}
+        - name: tmp
+          emptyDir: {sizeLimit: 1Gi}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: job-worker
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 1, maxSurge: 1}
+  selector:
+    matchLabels: {app.kubernetes.io/name: job-worker}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: job-worker}
+    spec:
+      serviceAccountName: financial-agent-runtime
+      terminationGracePeriodSeconds: 270
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: worker
+          image: financial-research-agent-job-api:latest
+          imagePullPolicy: IfNotPresent
+          command: [python, -m, financial_research_agent.jobs.worker]
+          envFrom:
+            - configMapRef: {name: financial-agent-config}
+            - secretRef: {name: financial-agent-secrets}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 500m, memory: 768Mi}
+            limits: {cpu: "2", memory: 2Gi}
+          volumeMounts:
+            - {name: lake, mountPath: /lake}
+            - {name: artifacts, mountPath: /artifacts}
+            - {name: reports, mountPath: /data/reports, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: lake
+          persistentVolumeClaim: {claimName: agent-lake}
+        - name: artifacts
+          emptyDir: {sizeLimit: 1Gi}
+        - name: reports
+          emptyDir: {sizeLimit: 1Gi}
+        - name: tmp
+          emptyDir: {sizeLimit: 1Gi}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-gateway
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  selector:
+    matchLabels: {app.kubernetes.io/name: backend-gateway}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: backend-gateway}
+    spec:
+      serviceAccountName: financial-agent-runtime
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: gateway
+          image: financial-research-agent-backend-gateway:latest
+          imagePullPolicy: IfNotPresent
+          ports: [{name: http, containerPort: 8080}]
+          envFrom:
+            - configMapRef: {name: financial-agent-config}
+            - secretRef: {name: financial-agent-secrets}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          startupProbe: &gatewayProbe
+            httpGet: {path: /actuator/health/readiness, port: http}
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            <<: *gatewayProbe
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: {path: /actuator/health/liveness, port: http}
+            periodSeconds: 15
+            failureThreshold: 4
+          resources:
+            requests: {cpu: 200m, memory: 256Mi}
+            limits: {cpu: "1", memory: 768Mi}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 512Mi}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: lake-bootstrap
+spec:
+  schedule: "17 2 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels: {app.kubernetes.io/name: lake-bootstrap}
+        spec:
+          serviceAccountName: financial-agent-runtime
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            fsGroup: 10001
+            seccompProfile: {type: RuntimeDefault}
+          containers:
+            - name: bootstrap
+              image: financial-research-agent-job-api:latest
+              imagePullPolicy: IfNotPresent
+              command: [python, -m, financial_research_agent.data_management.bootstrap]
+              envFrom:
+                - configMapRef: {name: financial-agent-config}
+                - secretRef: {name: financial-agent-secrets}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: {drop: [ALL]}
+              resources:
+                requests: {cpu: 100m, memory: 256Mi}
+                limits: {cpu: "1", memory: 1Gi}
+              volumeMounts:
+                - {name: lake, mountPath: /lake}
+                - {name: tmp, mountPath: /tmp}
+          volumes:
+            - name: lake
+              persistentVolumeClaim: {claimName: agent-lake}
+            - name: tmp
+              emptyDir: {sizeLimit: 512Mi}

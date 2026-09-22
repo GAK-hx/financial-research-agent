@@ -75,8 +75,10 @@ class ControlledTool(FinancialTool):
         evidence = Evidence(
             evidence_id=f"{task_id}-{arguments.stock_code}",
             evidence_type=(
-                "research_report"
-                if self.definition.name == "report_search"
+                "report_candidate"
+                if self.definition.name == "report_candidate_search"
+                else "research_report"
+                if self.definition.name in {"report_search", "report_content_search"}
                 else "financial"
                 if self.definition.name == "financial_query"
                 else "indicator"
@@ -92,13 +94,31 @@ class ControlledTool(FinancialTool):
                     "page_number": 1,
                     "chunk_id": "chunk-test",
                 }
-                if self.definition.name == "report_search"
+                if self.definition.name in {"report_search", "report_content_search"}
+                else {
+                    "candidate_id": "rpt_0123456789abcdef",
+                    "candidate_set_id": "rcs_0123456789abcdef",
+                    "document_id": "document-test",
+                    "stock_code": arguments.stock_code,
+                    "institution": "测试证券",
+                    "report_title": "测试研报",
+                    "report_date": "2026-07-01",
+                    "rank": 1,
+                    "applied_start_date": "2026-01-16",
+                    "applied_end_date": "2026-07-15",
+                    "coverage_status": "limited",
+                }
+                if self.definition.name == "report_candidate_search"
                 else {}
             ),
             source=SourceReference(
                 source_type=(
                     "milvus"
-                    if self.definition.name == "report_search"
+                    if self.definition.name in {
+                        "report_search",
+                        "report_candidate_search",
+                        "report_content_search",
+                    }
                     else "calculation"
                     if self.definition.name == "indicator_calculator"
                     else "iceberg"
@@ -106,8 +126,10 @@ class ControlledTool(FinancialTool):
                 locator=f"test://{task_id}",
                 observed_at=datetime.now(timezone.utc),
                 metadata=(
-                    {"page_number": 1}
-                    if self.definition.name == "report_search"
+                    {"page_number": 1, "document_id": "document-test"}
+                    if self.definition.name in {"report_search", "report_content_search"}
+                    else {"document_id": "document-test"}
+                    if self.definition.name == "report_candidate_search"
                     else {
                         "formula_version": "test-v1",
                         "input_locator": "test://market",
@@ -126,7 +148,14 @@ def controlled_registry(calls: list[str] | None = None) -> ToolRegistry:
     registry.register(ControlledTool("market_query", "market", calls, delay=0.02))
     registry.register(ControlledTool("indicator_calculator", "market", calls))
     registry.register(ControlledTool("financial_query", "financial", calls))
-    registry.register(ControlledTool("report_search", "research_report", calls, delay=0.02))
+    registry.register(
+        ControlledTool(
+            "report_candidate_search", "research_report", calls, delay=0.02
+        )
+    )
+    registry.register(
+        ControlledTool("report_content_search", "research_report", calls, delay=0.02)
+    )
     registry.register(ControlledTool("stock_comparison", "market", calls))
     return registry
 
@@ -237,8 +266,8 @@ class PlannerValidatorTests(unittest.IsolatedAsyncioTestCase):
         planner = StructuredPlanner(self.registry, RulePlanner(self.registry), InvalidProvider())
         cases = {
             "贵州茅台最近一个月股价走势": ["market", "indicator"],
-            "贵州茅台最新研报观点": ["report"],
-            "贵州茅台最近一年股价和研报观点": ["market", "indicator", "report"],
+            "贵州茅台最新研报观点": ["report_candidates"],
+            "贵州茅台最近一年股价和研报观点": ["market", "indicator", "report_candidates"],
             "贵州茅台最近一年营收和利润": ["financial"],
         }
         for question, task_ids in cases.items():
@@ -251,7 +280,7 @@ class PlannerValidatorTests(unittest.IsolatedAsyncioTestCase):
         plan = RulePlanner(self.registry).create_plan(comprehensive, "综合分析")
         dependencies = {task.task_id: task.depends_on for task in plan.tasks}
         self.assertEqual(dependencies["indicator"], ["market"])
-        self.assertEqual(dependencies["report"], [])
+        self.assertEqual(dependencies["report_candidates"], [])
 
     def test_unknown_tool_and_cycle_are_rejected(self):
         query = self.interpreter.interpret("贵州茅台最近一个月股价走势")
@@ -308,7 +337,7 @@ class PlannerValidatorTests(unittest.IsolatedAsyncioTestCase):
                 switched, expected_query=query
             )
 
-    def test_financial_plan_cannot_add_report_search(self):
+    def test_financial_plan_cannot_add_report_candidate_search(self):
         query = self.interpreter.interpret("贵州茅台最近一年营收和利润")
         plan = RulePlanner(self.registry).create_plan(query, "财务分析")
         plan = plan.model_copy(
@@ -317,7 +346,7 @@ class PlannerValidatorTests(unittest.IsolatedAsyncioTestCase):
                     *plan.tasks,
                     AnalysisTask(
                         task_id="report",
-                        tool_name=ToolName.REPORT_SEARCH,
+                        tool_name=ToolName.REPORT_CANDIDATE_SEARCH,
                         arguments={
                             "stock_code": "600519",
                             "query": "营收和利润",
@@ -346,7 +375,7 @@ class PlannerValidatorTests(unittest.IsolatedAsyncioTestCase):
                             }
                         }
                     )
-                    if task.tool_name == ToolName.REPORT_SEARCH
+                    if task.tool_name == ToolName.REPORT_CANDIDATE_SEARCH
                     else task
                     for task in plan.tasks
                 ]
@@ -358,7 +387,7 @@ class PlannerValidatorTests(unittest.IsolatedAsyncioTestCase):
         report_task = next(
             task
             for task in normalized.tasks
-            if task.tool_name == ToolName.REPORT_SEARCH
+            if task.tool_name == ToolName.REPORT_CANDIDATE_SEARCH
         )
         self.assertEqual(
             report_task.arguments["query"],

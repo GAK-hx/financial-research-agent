@@ -188,6 +188,11 @@ class MilvusReportStore:
             clauses.append(f'report_date <= "{_quoted(str(filters["end_date"]))}"')
         if filters.get("institution"):
             clauses.append(f'institution == "{_quoted(str(filters["institution"]))}"')
+        if filters.get("document_ids"):
+            document_ids = ",".join(
+                f'"{_quoted(str(item))}"' for item in filters["document_ids"]
+            )
+            clauses.append(f"document_id in [{document_ids}]")
         results = client.search(
             collection_name=self.collection_name,
             data=[np.asarray(query_vector, dtype=np.float32).tolist()],
@@ -383,6 +388,12 @@ class SqliteKeywordReportStore:
         if filters.get("institution"):
             clauses.append("institution = ?")
             parameters.append(str(filters["institution"]))
+        if filters.get("document_ids"):
+            document_ids = list(filters["document_ids"])
+            clauses.append(
+                "document_id IN (" + ",".join("?" for _ in document_ids) + ")"
+            )
+            parameters.extend(document_ids)
         sql = (
             "SELECT chunk_id, bm25(report_chunks_fts) AS rank_score "
             "FROM report_chunks_fts WHERE "
@@ -438,12 +449,15 @@ class SqliteKeywordReportStore:
             item.lower()
             for item in re.findall(r"[0-9A-Za-z]+|[\u3400-\u9fff]{2,}", query)
         ]
+        allowed_documents = set(filters.get("document_ids") or [])
         scored: list[tuple[float, ReportChunk]] = []
         for row in connection.execute("SELECT payload FROM report_chunks"):
             chunk = ReportChunk.model_validate(json.loads(row["payload"]))
             if chunk.stock_code != stock_code:
                 continue
             if filters.get("institution") and chunk.institution != filters["institution"]:
+                continue
+            if allowed_documents and chunk.document_id not in allowed_documents:
                 continue
             if filters.get("start_date") and (
                 not chunk.report_date or chunk.report_date < filters["start_date"]

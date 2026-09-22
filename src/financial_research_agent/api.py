@@ -402,6 +402,36 @@ def create_app() -> FastAPI:
             ),
             "# TYPE financial_agent_active_workers gauge",
             f"financial_agent_active_workers {values['active_workers']}",
+            "# TYPE financial_agent_retrieval_cache_total counter",
+            *[
+                (
+                    "financial_agent_retrieval_cache_total"
+                    f'{{decision="{key}"}} {count}'
+                )
+                for key, count in sorted(
+                    values.get("retrieval_cache", {}).items()
+                )
+            ],
+            "# TYPE financial_agent_retrieval_external_calls_saved counter",
+            (
+                "financial_agent_retrieval_external_calls_saved "
+                f"{values.get('retrieval_external_calls_saved', 0)}"
+            ),
+            "# TYPE financial_agent_retrieval_waiters gauge",
+            (
+                "financial_agent_retrieval_waiters "
+                f"{values.get('retrieval_waiters', 0)}"
+            ),
+            "# TYPE financial_agent_redis_shared_state gauge",
+            *[
+                (
+                    "financial_agent_redis_shared_state"
+                    f'{{metric="{key}"}} {value}'
+                )
+                for key, value in sorted(
+                    values.get("redis_shared_state", {}).items()
+                )
+            ],
         ]
         return "\n".join(lines) + "\n"
 
@@ -851,8 +881,11 @@ async def _health_components(settings: Settings) -> dict[str, HealthComponent]:
             detail=None if auth_ready else "AGENT_API_KEY_REQUIRED",
         ),
     }
-    checks = [iceberg_check(), milvus_check()]
-    names = ["iceberg", "milvus"]
+    checks = [iceberg_check()]
+    names = ["iceberg"]
+    if settings.milvus_enabled:
+        names.append("milvus")
+        checks.append(milvus_check())
     if settings.checkpoint_backend == "postgres":
         async def postgres_check() -> HealthComponent:
             try:
@@ -876,6 +909,53 @@ async def _health_components(settings: Settings) -> dict[str, HealthComponent]:
 
         names.append("postgres")
         checks.append(postgres_check())
+    if settings.elasticsearch_enabled:
+        async def elasticsearch_check() -> HealthComponent:
+            try:
+                from elasticsearch import AsyncElasticsearch
+
+                client = AsyncElasticsearch(
+                    settings.elasticsearch_url,
+                    request_timeout=settings.elasticsearch_request_timeout_seconds,
+                )
+                try:
+                    ready = await asyncio.wait_for(client.ping(), timeout=2)
+                finally:
+                    await client.close()
+                return HealthComponent(
+                    status="ready" if ready else "unavailable",
+                    detail=None if ready else "PING_FAILED",
+                )
+            except Exception as exc:
+                return HealthComponent(
+                    status="unavailable", detail=type(exc).__name__
+                )
+
+        names.append("elasticsearch")
+        checks.append(elasticsearch_check())
+    if settings.redis_enabled:
+        async def redis_check() -> HealthComponent:
+            from financial_research_agent.shared_state import build_shared_state
+
+            shared_state = build_shared_state(settings)
+            try:
+                ready = await asyncio.wait_for(
+                    shared_state.ping(),
+                    timeout=settings.redis_connect_timeout_seconds + 0.5,
+                )
+                return HealthComponent(
+                    status="ready" if ready else "unavailable",
+                    detail=None if ready else "PING_FAILED",
+                )
+            except Exception as exc:
+                return HealthComponent(
+                    status="unavailable", detail=type(exc).__name__
+                )
+            finally:
+                await shared_state.aclose()
+
+        names.append("redis")
+        checks.append(redis_check())
     results = await asyncio.gather(*checks)
     components.update(dict(zip(names, results, strict=True)))
     return components
@@ -886,12 +966,16 @@ def _analyze_response(result: ResearchRunResult, settings: Settings, registry) -
     tasks = {task.task_id: task for task in orchestration.plan.tasks} if orchestration.plan else {}
     replan_tool_names = {
         "event": ToolName.EVENT_SEARCH.value,
-        "research_report": ToolName.REPORT_SEARCH.value,
+        "web_source": ToolName.WEB_SEARCH.value,
+        "report_candidate": ToolName.REPORT_CANDIDATE_SEARCH.value,
+        "research_report": ToolName.REPORT_CONTENT_SEARCH.value,
     }
 
     def tool_name_for(task_id: str) -> str:
         if task_id in tasks:
             return tasks[task_id].tool_name.value
+        if task_id == "report_content":
+            return ToolName.REPORT_CONTENT_SEARCH.value
         evidence_type = task_id.partition("_replan")[0]
         return replan_tool_names.get(evidence_type, "unknown")
 
@@ -904,6 +988,11 @@ def _analyze_response(result: ResearchRunResult, settings: Settings, registry) -
             error_message=item.error_message,
             latency_ms=item.latency_ms,
             evidence_count=len(item.evidence),
+            cache_decision=item.metadata.get("cache_decision"),
+            retrieval_snapshot_id=item.metadata.get("retrieval_snapshot_id"),
+            refresh_performed=bool(item.metadata.get("refresh_performed", False)),
+            stale_fallback=bool(item.metadata.get("stale_fallback", False)),
+            refresh_error=item.metadata.get("refresh_error"),
         )
         for item in orchestration.tool_results
     ]
@@ -956,6 +1045,11 @@ def _analyze_response(result: ResearchRunResult, settings: Settings, registry) -
         context_manifests=orchestration.context_manifests,
         semantic_alignment=orchestration.semantic_alignment,
         execution_metadata=orchestration.execution_metadata,
+        report_workflow=orchestration.report_workflow,
+        report_facts=orchestration.report_facts,
+        cache_summary=orchestration.cache_summary,
+        analysis_artifact=orchestration.analysis_artifact,
+        presentation=orchestration.presentation,
         reporting_status=reporting.status if reporting else None,
         query_spec=orchestration.query,
         plan=orchestration.plan,

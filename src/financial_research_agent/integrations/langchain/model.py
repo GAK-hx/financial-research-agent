@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from langchain_core.messages import AIMessage, message_to_dict
@@ -21,6 +22,7 @@ from financial_research_agent.providers.model import (
     AttemptObserver,
     OpenAICompatibleProvider,
     ProviderUnavailable,
+    StructuredOutputError,
 )
 
 
@@ -28,8 +30,58 @@ class ContextSummary(BaseModel):
     summary: str
 
 
+def _recover_structured_output(
+    raw_content: str, schema: type[BaseModel]
+) -> BaseModel | None:
+    """Recover a valid object from common JSON-mode formatting deviations.
+
+    This is deliberately local and deterministic. A schema formatting error should not
+    consume several identical model retries; transport and rate-limit failures still use
+    the configured retry policy.
+    """
+    stripped = raw_content.strip()
+    candidates = [stripped]
+    fenced = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", stripped, flags=re.DOTALL)
+    if fenced:
+        candidates.append(fenced.group(1).strip())
+    first_brace = stripped.find("{")
+    last_brace = stripped.rfind("}")
+    if 0 <= first_brace < last_brace:
+        candidates.append(stripped[first_brace : last_brace + 1])
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        try:
+            return schema.model_validate(json.loads(candidate))
+        except (json.JSONDecodeError, ValueError, TypeError):
+            continue
+    return None
+
+
 class LangChainModelProvider(OpenAICompatibleProvider):
     """LangChain Runnable provider behind the existing governed model boundary."""
+
+    async def create_structured_response(
+        self,
+        *,
+        instruction: str,
+        input_payload: dict[str, Any],
+        schema: type[BaseModel],
+        max_tokens: int,
+        operation: str,
+        attempt_observer: AttemptObserver | None = None,
+    ) -> ModelGatewayResponse:
+        return await self._invoke_structured(
+            instruction=instruction,
+            payload=input_payload,
+            schema=schema,
+            max_tokens=max_tokens,
+            operation=operation,
+            attempt_observer=attempt_observer,
+        )
 
     async def create_plan_response(
         self,
@@ -214,8 +266,12 @@ class LangChainModelProvider(OpenAICompatibleProvider):
             method="json_mode",
             include_raw=True,
         )
-        serialized_payload = json.dumps(payload, ensure_ascii=False)
+        prompt_payload = dict(payload)
+        prompt_payload.setdefault("output_schema", schema.model_json_schema())
+        serialized_payload = json.dumps(prompt_payload, ensure_ascii=False)
         last_parsing_error: Exception | None = None
+        parsed_output: BaseModel | dict[str, Any] | None = None
+        raw: Any = None
         for attempt in range(self.settings.model_max_retries + 1):
             observer_token = (
                 await attempt_observer.before_attempt(attempt)
@@ -236,9 +292,23 @@ class LangChainModelProvider(OpenAICompatibleProvider):
                             },
                         },
                     )
+                raw = result.get("raw")
                 parsed = result.get("parsed")
                 parsing_error = result.get("parsing_error")
                 if parsing_error is not None or parsed is None:
+                    raw_content = getattr(raw, "content", "")
+                    if not isinstance(raw_content, str):
+                        raw_content = json.dumps(
+                            raw_content, ensure_ascii=False, default=str
+                        )
+                    recovered = _recover_structured_output(raw_content, schema)
+                    if recovered is not None:
+                        parsed_output = recovered
+                        if attempt_observer is not None:
+                            await attempt_observer.after_attempt(
+                                observer_token, succeeded=True
+                            )
+                        break
                     last_parsing_error = (
                         parsing_error
                         if isinstance(parsing_error, Exception)
@@ -250,12 +320,12 @@ class LangChainModelProvider(OpenAICompatibleProvider):
                         await attempt_observer.after_attempt(
                             observer_token, succeeded=False
                         )
-                    if attempt >= self.settings.model_max_retries:
-                        break
-                    await self._retry_delay(attempt, last_parsing_error)
-                    continue
+                    # Retrying the same valid HTTP response does not repair its JSON.
+                    # Persist the raw output so the caller can inspect or selectively rerun it.
+                    break
                 if attempt_observer is not None:
                     await attempt_observer.after_attempt(observer_token, succeeded=True)
+                parsed_output = parsed
                 break
             except Exception as exc:
                 if attempt_observer is not None:
@@ -263,19 +333,22 @@ class LangChainModelProvider(OpenAICompatibleProvider):
                 if attempt >= self.settings.model_max_retries or not self._retryable(exc):
                     raise
                 await self._retry_delay(attempt, exc)
-        if last_parsing_error is not None and (
-            result.get("parsing_error") is not None
-            or result.get("parsed") is None
-        ):
-            raise ProviderUnavailable(
+        if parsed_output is None and last_parsing_error is not None:
+            raw_content = getattr(raw, "content", "")
+            if not isinstance(raw_content, str):
+                raw_content = json.dumps(raw_content, ensure_ascii=False, default=str)
+            raise StructuredOutputError(
                 "structured output validation failed: "
-                f"{type(last_parsing_error).__name__}"
+                f"{type(last_parsing_error).__name__}",
+                raw_output=raw_content[:20_000],
             )
-        parsed = result.get("parsed")
-        raw = result.get("raw")
-        if parsed is None:
+        if parsed_output is None:
             raise ProviderUnavailable("model returned empty structured output")
-        content = parsed.model_dump(mode="json") if isinstance(parsed, BaseModel) else dict(parsed)
+        content = (
+            parsed_output.model_dump(mode="json")
+            if isinstance(parsed_output, BaseModel)
+            else dict(parsed_output)
+        )
         return ModelGatewayResponse(
             content=content,
             usage=self._message_usage(

@@ -1,0 +1,83 @@
+server:
+  port: 8080
+  shutdown: graceful
+
+spring:
+  application:
+    name: financial-agent-backend-gateway
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+  data:
+    redis:
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 1s
+      connect-timeout: 1s
+  cloud:
+    gateway:
+      server:
+        webflux:
+          httpclient:
+            connect-timeout: 3000
+            response-timeout: 480s
+          routes:
+            # New analysis work consumes the shared execution budget and is
+            # therefore fail-closed/rate-limited through Redis.
+            - id: financial-agent-create-run
+              uri: ${GATEWAY_PYTHON_BASE_URL:http://job-api:8000}
+              predicates:
+                - Path=/api/v1/runs,/api/v1/analyze
+                - Method=POST
+              filters:
+                - StripPrefix=2
+                - name: RequestRateLimiter
+                  args:
+                    key-resolver: "#{@gatewayKeyResolver}"
+                    redis-rate-limiter.replenishRate: ${GATEWAY_RATE_LIMIT_REPLENISH_RATE:5}
+                    redis-rate-limiter.burstCapacity: ${GATEWAY_RATE_LIMIT_BURST_CAPACITY:10}
+                    redis-rate-limiter.requestedTokens: ${GATEWAY_RATE_LIMIT_REQUESTED_TOKENS:1}
+            # Read/status/SSE/cancellation traffic remains available if Redis
+            # is temporarily unavailable; Python/PostgreSQL remain authoritative.
+            - id: financial-agent-api
+              uri: ${GATEWAY_PYTHON_BASE_URL:http://job-api:8000}
+              predicates:
+                - Path=/api/v1/**
+              filters:
+                - StripPrefix=2
+
+gateway:
+  python-base-url: ${GATEWAY_PYTHON_BASE_URL:http://job-api:8000}
+  internal-api-key: ${GATEWAY_INTERNAL_API_KEY:}
+  security:
+    external-api-key: ${GATEWAY_SECURITY_EXTERNAL_API_KEY:}
+    api-clients: ${GATEWAY_SECURITY_API_CLIENTS:}
+    default-tenant-id: ${GATEWAY_SECURITY_DEFAULT_TENANT_ID:local-gateway}
+    default-user-id: ${GATEWAY_SECURITY_DEFAULT_USER_ID:local-gateway}
+    default-role: ${GATEWAY_SECURITY_DEFAULT_ROLE:admin}
+    jwt-jwk-set-uri: ${GATEWAY_SECURITY_JWT_JWK_SET_URI:}
+    jwt-tenant-claim: ${GATEWAY_SECURITY_JWT_TENANT_CLAIM:tenant_id}
+    jwt-role-claim: ${GATEWAY_SECURITY_JWT_ROLE_CLAIM:role}
+  rate-limit:
+    replenish-rate: ${GATEWAY_RATE_LIMIT_REPLENISH_RATE:5}
+    burst-capacity: ${GATEWAY_RATE_LIMIT_BURST_CAPACITY:10}
+    requested-tokens: ${GATEWAY_RATE_LIMIT_REQUESTED_TOKENS:1}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+  health:
+    redis:
+      enabled: true
+
+logging:
+  level:
+    root: INFO
+    com.morshan.financial.gateway: INFO

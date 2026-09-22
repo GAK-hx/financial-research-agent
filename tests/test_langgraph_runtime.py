@@ -176,14 +176,21 @@ class LangGraphRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 "load_memory",
                 "interpret",
                 "align_semantics",
+                "resolve_report_request",
                 "remember_query",
                 "select_skill",
                 "initialize_governance",
                 "plan",
                 "validate_plan",
+                "decompose_work",
                 "execute_tools",
+                "assemble_retrieval_snapshot",
                 "build_evidence",
+                "validate_report_candidates",
+                "decide_report_depth",
                 "check_evidence_sufficiency",
+                "resolve_analysis_cache",
+                "analyze_or_reuse",
                 "generate_report",
                 "validate_report",
                 "completion_check",
@@ -193,7 +200,7 @@ class LangGraphRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(tool.calls, 1)
         self.assertEqual(
             state["skill_selection"]["snapshots"][0]["version_id"],
-            "financial_growth_analysis@1.0.0",
+            "financial_growth_analysis@1.1.0",
         )
 
     async def test_report_revision_is_an_explicit_graph_path(self) -> None:

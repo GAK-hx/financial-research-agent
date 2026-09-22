@@ -153,5 +153,7 @@ class PolicyEngine:
             requested = getattr(value, "top_k", None)
         if requested is None:
             requested = getattr(value, "max_events", None)
+        if requested is None:
+            requested = getattr(value, "max_results", None)
         if requested is not None and requested > configured:
             raise PolicyDenied("TOOL_ROW_LIMIT_EXCEEDED")

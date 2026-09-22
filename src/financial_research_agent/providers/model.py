@@ -6,6 +6,7 @@ import logging
 from typing import Any, Protocol
 
 import httpx
+from pydantic import BaseModel
 
 from financial_research_agent.config import Settings
 from financial_research_agent.domain.models import AnalysisPlan, QuerySpec, ResearchReport
@@ -36,6 +37,12 @@ class ProviderUnavailable(RuntimeError):
     pass
 
 
+class StructuredOutputError(ProviderUnavailable):
+    def __init__(self, message: str, *, raw_output: str = "") -> None:
+        super().__init__(message)
+        self.raw_output = raw_output
+
+
 class OpenAICompatibleProvider:
     """Minimal structured-output adapter; it has no data or tool execution access."""
 
@@ -64,6 +71,34 @@ class OpenAICompatibleProvider:
         return (
             await self.create_plan_response(question, query, tool_schemas)
         ).content
+
+    async def create_structured_response(
+        self,
+        *,
+        instruction: str,
+        input_payload: dict[str, Any],
+        schema: type[BaseModel],
+        max_tokens: int,
+        operation: str,
+        attempt_observer: AttemptObserver | None = None,
+    ) -> ModelGatewayResponse:
+        """Run a governed JSON-only model operation outside the main report schemas."""
+        self._ensure_configured()
+        prompt = {
+            "instruction": instruction,
+            "input": input_payload,
+            "output_schema": schema.model_json_schema(),
+            "operation": operation,
+        }
+        response = await self._request_json(
+            self._base_payload(
+                max_tokens=max_tokens,
+                message=json.dumps(prompt, ensure_ascii=False),
+            ),
+            attempt_observer=attempt_observer,
+        )
+        validated = schema.model_validate(response.content)
+        return response.model_copy(update={"content": validated.model_dump(mode="json")})
 
     async def create_plan_response(
         self,
@@ -147,8 +182,14 @@ class OpenAICompatibleProvider:
             "exact institution from each cited evidence item directly in the claim text, including "
             "claims that describe factual events. When repairing REPORT_ATTRIBUTION_MISSING, locate "
             "the cited evidence ID in report_context and add its exact institution to that claim. "
-            "Every number in the summary or a claim must appear in the text or structured data of "
-            "at least one evidence item cited by that same section. Preserve negative directions "
+            "A report_candidate item supports only report title, institution, date, rank and "
+            "coverage statements; never use it for report viewpoints, ratings, target prices, "
+            "forecasts, catalysts or risks. When report_context.report_facts is present, copy the "
+            "matching fact_id into a claim's fact_ids for target prices, ratings, forecasts and "
+            "other structured report facts. Never invent a fact_id. Numbers from market, financial "
+            "or calculation Evidence must appear in the text or structured data of at least one "
+            "Evidence item cited by that same section. A high-risk research-report number must match "
+            "a supplied report_fact linked to the same cited Evidence. Preserve negative directions "
             "such as decline and price fall; a drawdown may be stated as a positive magnitude. "
             "Do not cite one report chunk for a number that "
             "only appears in another chunk. A research-report claim containing numbers must use "
@@ -181,6 +222,7 @@ class OpenAICompatibleProvider:
                     {
                         "claim": "A claim supported by the cited current-run evidence.",
                         "evidence_ids": ["copy_an_exact_evidence_id_from_report_context"],
+                        "fact_ids": [],
                         "confidence": "medium",
                     }
                 ],

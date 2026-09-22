@@ -3,9 +3,9 @@
 ## 当前状态
 
 - 阶段：实施；
-- 状态：`STEP_04_TECHNICAL_GO_WITH_CAPACITY_BOUNDARY`；
-- 当前 Step：四个 Step 技术实现完成；GitHub 发布 Gate 待用户关闭；
-- 最近更新：2026-08-08。
+- 状态：`STEP_08_COMPLETE_PRIVATE`；
+- 当前 Step：Spring + Redis 多用户并发接入与恢复 Gate 完成；GitHub 发布 Gate 待用户关闭；
+- 最近更新：2026-09-22。
 
 ## 已完成
 
@@ -14,7 +14,7 @@
   Job API 和评测实现；
 - [x] 将优化工作合并为四个完整 Step；
 - [x] 为每个 Step 建立独立计划和进度文件；
-- [x] 项目默认模型配置改为 `deepseek-v4-flash`；
+- [x] 项目默认模型配置改为DeepSeek V4.1 Flash（`deepseek-flash`）；
 - [x] 明确不在本阶段引入通用多 Agent、GraphRAG、开放代码执行和实时交易。
 - [x] 将多租户并发、准入、配额、公平调度、背压和资源池治理纳入 Step 04；
 - [x] 完成 Step 04 身份边界、公平队列、有界 Worker、Provider 限流和薄演示界面；
@@ -77,7 +77,20 @@
 已完成 Step 01～04 的正确性、知识/记忆/上下文、分析 Tool/Skill、受控循环以及多租户并发
 交付。历史 Pro 评测产物只保留为历史证据；运行时、示例环境和后续计划均以 Flash 为默认。
 
-## 下一动作
+## Step 08 规划
 
-轮换历史 Key，决定 GitHub 私有/公开与许可范围，再执行首次发布；若未来容量目标超过约 30 个
-同时提交请求，先升级准入计数并重新压测，而不是直接增加第二套队列。
+- [x] 将 Spring Boot 定位为对外认证、限流、幂等和 SSE 接入层；
+- [x] 将 Redis 定位为跨实例限流、短 TTL 热缓存和事件通知层；
+- [x] 保留 Python Agent 执行层和 PostgreSQL 可靠事实层；
+- [x] 实施 Redis 共享热状态；
+- [x] 实施 Spring Gateway；
+- [x] 完成 20～50 并发、交叉查询和故障恢复 Gate。
+
+## 交付收口
+
+- [x] 根README已按组件重写，并补充企业财务风险、公开Benchmark、数据工程和Kubernetes运行结果；
+- [x] 完成当前文件、完整Git历史、敏感路径和大文件审计；
+- [ ] 公开前选择代码许可证并确认第三方数据与依赖许可；
+- [ ] 用户在Provider控制台轮换历史对话中出现过的Key。
+
+GitHub仍保持私有，只有用户再次明确允许后才改变可见性。

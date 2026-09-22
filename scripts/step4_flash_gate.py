@@ -55,7 +55,7 @@ def planner_schemas() -> list[dict]:
 
 async def main() -> None:
     settings = Settings(
-        model_name="deepseek-v4-flash",
+        model_name="deepseek-flash",
         provider_shared_rate_limit_enabled=True,
         provider_max_parallel_requests=2,
     )

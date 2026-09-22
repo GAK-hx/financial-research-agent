@@ -255,7 +255,12 @@ class LangChainEnhancementSmokeTests(unittest.IsolatedAsyncioTestCase):
             {item.value for item in ToolName},
         )
         agent_context = skill_agent_context(selection)
-        self.assertIn("report_search", agent_context["allowed_tool_names"])
+        self.assertIn(
+            "report_candidate_search", agent_context["allowed_tool_names"]
+        )
+        self.assertIn(
+            "report_content_search", agent_context["allowed_tool_names"]
+        )
         self.assertEqual(
             agent_context["required_evidence"][0]["evidence_type"],
             "research_report",

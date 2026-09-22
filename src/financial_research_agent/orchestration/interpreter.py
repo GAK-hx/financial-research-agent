@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 from financial_research_agent.domain.models import (
     Intent,
     QuerySpec,
+    ReportAnalysisRequest,
     ResolvedTimeExpression,
 )
 
@@ -34,6 +35,20 @@ FACTOR_TERMS = ("因子", "截面", "筛选", "排名", "股票池")
 TECHNICAL_INTENT_TERMS = ("技术分析", "技术面", "量价", "动量", "技术指标")
 FUNDAMENTAL_INTENT_TERMS = ("基本面", "基本面分析")
 COMPARISON_TERMS = ("比较", "对比")
+REPORT_DEEP_TERMS = (
+    "总结", "观点", "详细", "深度", "全文", "目标价", "评级", "盈利预测",
+    "业绩预测", "机构分歧", "券商分歧", "催化剂", "风险提示",
+)
+REPORT_LIST_TERMS = ("有哪些", "列表", "清单", "查找", "筛选")
+REPORT_TOPIC_TERMS = {
+    "viewpoint": ("总结", "观点", "详细", "深度", "全文"),
+    "target_price": ("目标价",),
+    "rating": ("评级",),
+    "earnings_forecast": ("盈利预测", "业绩预测", "盈利预期"),
+    "catalyst": ("催化剂", "催化"),
+    "risk": ("风险提示", "风险"),
+    "institution_disagreement": ("机构分歧", "券商分歧", "比较机构", "对比机构"),
+}
 
 DIMENSION_TERMS = {
     "technical_analysis": TECHNICAL_INTENT_TERMS,
@@ -122,6 +137,11 @@ class QueryInterpreter:
         analysis_domains = self._domains(question)
         time_scope = self.resolve_time_expression(question, intent)
         dimensions = self._dimensions(question)
+        report_request = self.resolve_report_request(
+            question,
+            time_scope,
+            enabled="report" in analysis_domains,
+        )
         return QuerySpec(
             stock_codes=stock_codes,
             start_date=time_scope.start_date,
@@ -130,6 +150,78 @@ class QueryInterpreter:
             dimensions=dimensions[:8],
             analysis_domains=analysis_domains,
             time_scope=time_scope,
+            report_request=report_request,
+        )
+
+    def resolve_report_request(
+        self,
+        question: str,
+        time_scope: ResolvedTimeExpression,
+        *,
+        enabled: bool,
+    ) -> ReportAnalysisRequest | None:
+        if not enabled:
+            return None
+        candidate_ids = list(
+            dict.fromkeys(re.findall(r"rpt_[a-f0-9]{16}", question.lower()))
+        )[:5]
+        ordinal_match = re.search(r"第\s*([1-5一二三四五])\s*(?:份|篇|个)", question)
+        ordinal = None
+        if ordinal_match:
+            raw = ordinal_match.group(1)
+            ordinal = int(raw) if raw.isdigit() else {
+                "一": 1, "二": 2, "三": 3, "四": 4, "五": 5
+            }[raw]
+        deep_topics = [
+            topic
+            for topic, terms in REPORT_TOPIC_TERMS.items()
+            if any(term in question for term in terms)
+        ]
+        deep = bool(
+            candidate_ids
+            or ordinal
+            or deep_topics
+            or any(term in question for term in REPORT_DEEP_TERMS)
+        )
+        if any(term in question for term in REPORT_LIST_TERMS) and not deep_topics:
+            deep = False
+        institution_match = re.search(
+            r"([\u4e00-\u9fa5A-Za-z]{2,20}(?:证券|研究所|资本|投行))"
+            r"(?:的?那份|的?这份|的研报|的报告)",
+            question,
+        )
+        title_match = re.search(
+            r"标题(?:包含|含有|为|是)\s*[《“\"]?"
+            r"([^》”\"，。；]{2,40})",
+            question,
+        )
+        explicit = (
+            bool(time_scope.original_text)
+            and time_scope.kind
+            in {
+                "absolute_range",
+                "relative_rolling",
+                "complete_period",
+                "calendar_period",
+            }
+        )
+        disagreement = "institution_disagreement" in deep_topics
+        return ReportAnalysisRequest(
+            mode="deep" if deep else "candidate_only",
+            explicit_date_range=explicit,
+            start_date=time_scope.start_date if explicit else None,
+            end_date=time_scope.end_date if explicit else self.today,
+            candidate_ids=candidate_ids,
+            candidate_ordinal=ordinal,
+            institution_filters=(
+                [institution_match.group(1)] if institution_match else []
+            ),
+            title_keywords=([title_match.group(1)] if title_match else []),
+            deep_topics=deep_topics,
+            allow_unknown_date=any(
+                term in question for term in ("日期未知", "未知日期", "不限制日期")
+            ),
+            max_deep_documents=5 if disagreement else 3,
         )
 
     @staticmethod

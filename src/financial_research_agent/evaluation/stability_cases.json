@@ -39,7 +39,7 @@
       "expected_start_date": "2023-07-15",
       "expected_end_date": "2026-07-15",
       "expected_tools": ["financial_query"],
-      "expected_skills": ["financial_growth_analysis@1.0.0"],
+      "expected_skills": ["financial_growth_analysis@1.1.0"],
       "required_evidence_types": ["financial"],
       "require_harness_controls": true
     },
@@ -52,7 +52,7 @@
       "expected_start_date": "2024-07-15",
       "expected_end_date": "2026-07-15",
       "expected_tools": ["financial_query"],
-      "expected_skills": ["profitability_analysis@1.0.0"],
+      "expected_skills": ["profitability_analysis@1.1.0"],
       "required_evidence_types": ["financial"],
       "require_harness_controls": true
     },
@@ -62,8 +62,8 @@
       "question": "贵州茅台券商如何看渠道改革",
       "expected_intent": "report",
       "expected_stock_codes": ["600519"],
-      "expected_tools": ["report_search"],
-      "expected_skills": ["research_report_review@1.0.0"],
+      "expected_tools": ["report_candidate_search"],
+      "expected_skills": ["research_report_review@1.1.0"],
       "required_evidence_types": ["research_report"],
       "require_harness_controls": true
     },
@@ -73,8 +73,8 @@
       "question": "宁德时代机构研报中的全球化观点",
       "expected_intent": "report",
       "expected_stock_codes": ["300750"],
-      "expected_tools": ["report_search"],
-      "expected_skills": ["research_report_review@1.0.0"],
+      "expected_tools": ["report_candidate_search"],
+      "expected_skills": ["research_report_review@1.1.0"],
       "required_evidence_types": ["research_report"],
       "require_harness_controls": true
     },
@@ -86,8 +86,8 @@
       "expected_stock_codes": ["600519"],
       "expected_start_date": "2025-07-15",
       "expected_end_date": "2026-07-15",
-      "expected_tools": ["market_query", "indicator_calculator", "report_search"],
-      "expected_skills": ["comprehensive_stock_research@1.0.0"],
+      "expected_tools": ["market_query", "indicator_calculator", "report_candidate_search"],
+      "expected_skills": ["comprehensive_stock_research@1.1.0"],
       "required_evidence_types": ["market", "indicator", "research_report"],
       "require_harness_controls": true
     },
@@ -99,8 +99,8 @@
       "expected_stock_codes": ["300750"],
       "expected_start_date": "2026-01-15",
       "expected_end_date": "2026-07-15",
-      "expected_tools": ["market_query", "indicator_calculator", "report_search"],
-      "expected_skills": ["comprehensive_stock_research@1.0.0"],
+      "expected_tools": ["market_query", "indicator_calculator", "report_candidate_search"],
+      "expected_skills": ["comprehensive_stock_research@1.1.0"],
       "required_evidence_types": ["market", "indicator", "research_report"],
       "require_harness_controls": true
     },
@@ -113,7 +113,7 @@
       "expected_start_date": "2026-01-01",
       "expected_end_date": "2026-07-15",
       "expected_tools": ["market_query", "indicator_calculator"],
-      "expected_skills": ["market_trend_analysis@1.0.0", "concise_research_report@1.0.0"],
+      "expected_skills": ["market_trend_analysis@1.0.0", "concise_research_report@1.1.0"],
       "required_evidence_types": ["market", "indicator"],
       "require_harness_controls": true
     },
@@ -123,8 +123,8 @@
       "question": "风险优先汇总300750机构观点",
       "expected_intent": "report",
       "expected_stock_codes": ["300750"],
-      "expected_tools": ["report_search"],
-      "expected_skills": ["research_report_review@1.0.0", "risk_focused_report@1.0.0"],
+      "expected_tools": ["report_candidate_search"],
+      "expected_skills": ["research_report_review@1.1.0", "risk_focused_report@1.1.0"],
       "required_evidence_types": ["research_report"],
       "require_harness_controls": true
     }

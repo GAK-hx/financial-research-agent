@@ -143,6 +143,7 @@ class ApiTests(unittest.TestCase):
     def client(self, result: ResearchRunResult) -> TestClient:
         app = create_app()
         app.state.settings = Settings(
+            identity_mode="local",
             model_api_key="super-secret-key",
             analyze_via_jobs=False,
         )

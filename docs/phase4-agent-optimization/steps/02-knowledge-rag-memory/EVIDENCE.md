@@ -36,7 +36,7 @@ PostgreSQL 只读核验为 `local_demo_events / active / 2`。API
 | Dense | 1.0000 | 1.0000 | 1.0000 | 7.13 ms |
 | Hybrid | 1.0000 | 1.0000 | 1.0000 | 8.52 ms |
 
-逐题结果：[rag_evaluation.json](/Users/fangzhijian/Desktop/python/financial-research-agent/artifacts/phase4/step02/rag_evaluation.json)
+逐题结果由本地Gate生成到`artifacts/phase4/step02/rag_evaluation.json`，运行产物不进入Git。
 
 ## 3. 记忆与上下文
 

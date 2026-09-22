@@ -124,7 +124,12 @@ class ContextBuilderTests(unittest.IsolatedAsyncioTestCase):
             dimensions=[],
         )
         selection = SkillRegistry.from_builtin_catalog().select(
-            query, {"financial_query", "report_search"}
+            query,
+            {
+                "financial_query",
+                "report_candidate_search",
+                "report_content_search",
+            },
         )
         built = await ContextBuilder(
             policy_version="test-policy"
@@ -240,7 +245,7 @@ class ContextBuilderTests(unittest.IsolatedAsyncioTestCase):
             dimensions=[],
         )
         selection = SkillRegistry.from_builtin_catalog().select(
-            query, {"report_search"}
+            query, {"report_candidate_search", "report_content_search"}
         )
         built = await ContextBuilder(policy_version="test").build_plan(
             run_id="lineage-run",

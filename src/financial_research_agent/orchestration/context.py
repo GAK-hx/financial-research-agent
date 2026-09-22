@@ -11,6 +11,7 @@ from financial_research_agent.domain.models import (
     Evidence,
     ExecutionMetadata,
     QuerySpec,
+    ReportFact,
     SemanticAlignmentResult,
     ToolResult,
 )
@@ -106,3 +107,8 @@ class OrchestrationResult(BaseModel):
     context_manifests: dict[str, ContextManifest] = Field(default_factory=dict)
     semantic_alignment: SemanticAlignmentResult | None = None
     execution_metadata: ExecutionMetadata | None = None
+    report_workflow: dict | None = None
+    report_facts: list[ReportFact] = Field(default_factory=list)
+    cache_summary: dict = Field(default_factory=dict)
+    analysis_artifact: dict | None = None
+    presentation: dict | None = None

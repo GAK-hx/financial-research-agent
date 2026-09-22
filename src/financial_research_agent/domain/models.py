@@ -25,10 +25,18 @@ class ToolName(StrEnum):
     FINANCIAL_QUERY = "financial_query"
     STOCK_COMPARISON = "stock_comparison"
     REPORT_SEARCH = "report_search"
+    REPORT_CANDIDATE_SEARCH = "report_candidate_search"
+    REPORT_CONTENT_SEARCH = "report_content_search"
     TECHNICAL_ANALYSIS = "technical_analysis"
     FUNDAMENTAL_ANALYSIS = "fundamental_analysis"
     FACTOR_SCREEN = "factor_screen"
     EVENT_SEARCH = "event_search"
+    WEB_SEARCH = "web_search"
+
+
+class ReportValidationProfile(StrEnum):
+    CANDIDATE_LISTING = "candidate_listing_v1"
+    REPORT_ANALYSIS = "report_analysis_v2"
 
 
 class ResearchRequest(BaseModel):
@@ -78,6 +86,44 @@ class ResolvedTimeExpression(BaseModel):
         return self
 
 
+class ReportAnalysisRequest(BaseModel):
+    mode: Literal["candidate_only", "deep"] = "candidate_only"
+    explicit_date_range: bool = False
+    start_date: date | None = None
+    end_date: date | None = None
+    institution_filters: list[str] = Field(default_factory=list, max_length=5)
+    title_keywords: list[str] = Field(default_factory=list, max_length=8)
+    candidate_ids: list[str] = Field(default_factory=list, max_length=5)
+    candidate_ordinal: int | None = Field(default=None, ge=1, le=5)
+    deep_topics: list[
+        Literal[
+            "viewpoint",
+            "target_price",
+            "rating",
+            "earnings_forecast",
+            "catalyst",
+            "risk",
+            "institution_disagreement",
+        ]
+    ] = Field(default_factory=list, max_length=7)
+    allow_unknown_date: bool = False
+    candidate_top_k: int = Field(default=5, ge=1, le=10)
+    minimum_candidates: int = Field(default=3, ge=1, le=5)
+    max_deep_documents: int = Field(default=3, ge=1, le=5)
+
+    @model_validator(mode="after")
+    def validate_dates_and_mode(self) -> ReportAnalysisRequest:
+        if self.start_date and self.end_date and self.end_date < self.start_date:
+            raise ValueError("report request end_date cannot precede start_date")
+        if self.candidate_ids or self.candidate_ordinal:
+            self.mode = "deep"
+        if len(self.candidate_ids) != len(set(self.candidate_ids)):
+            raise ValueError("report candidate ids must be unique")
+        if len(self.deep_topics) != len(set(self.deep_topics)):
+            raise ValueError("report deep topics must be unique")
+        return self
+
+
 class QuerySpec(BaseModel):
     stock_codes: list[str] = Field(min_length=1, max_length=20)
     start_date: date | None = None
@@ -91,6 +137,7 @@ class QuerySpec(BaseModel):
         max_length=5,
     )
     time_scope: ResolvedTimeExpression | None = None
+    report_request: ReportAnalysisRequest | None = None
 
     @model_validator(mode="after")
     def validate_dates_and_codes(self) -> QuerySpec:
@@ -100,6 +147,8 @@ class QuerySpec(BaseModel):
             raise ValueError("stock code must contain exactly six digits")
         if len(self.analysis_domains) != len(set(self.analysis_domains)):
             raise ValueError("analysis_domains must be unique")
+        if self.report_request is not None and "report" not in self.analysis_domains:
+            raise ValueError("report request requires the report analysis domain")
         return self
 
 
@@ -160,11 +209,13 @@ class Evidence(BaseModel):
         "market",
         "financial",
         "indicator",
+        "report_candidate",
         "research_report",
         "technical",
         "fundamental",
         "factor",
         "event",
+        "web_source",
         "comparison",
     ]
     subject: str
@@ -180,12 +231,48 @@ class ToolResult(BaseModel):
     error_code: str | None = None
     error_message: str | None = None
     latency_ms: int = Field(ge=0)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ReportClaim(BaseModel):
     claim: str = Field(min_length=2, max_length=2000)
     evidence_ids: list[str] = Field(min_length=1)
+    fact_ids: list[str] = Field(default_factory=list, max_length=20)
     confidence: Literal["high", "medium", "low"]
+
+
+class ReportFact(BaseModel):
+    fact_id: str = Field(pattern=r"^fact_[a-f0-9]{16}$")
+    fact_type: Literal[
+        "target_price",
+        "rating",
+        "earnings_forecast",
+        "financial_metric",
+        "catalyst",
+        "risk",
+    ]
+    metric_name: str | None = Field(default=None, max_length=128)
+    value: float | None = None
+    unit: str | None = Field(default=None, max_length=32)
+    currency: str | None = Field(default=None, max_length=16)
+    period: str | None = Field(default=None, max_length=64)
+    text_value: str | None = Field(default=None, max_length=500)
+    source_span: str = Field(min_length=1, max_length=1000)
+    document_id: str = Field(min_length=1, max_length=128)
+    page_number: int = Field(ge=1)
+    evidence_id: str = Field(min_length=1, max_length=256)
+    confidence: Literal["high", "medium", "low"] = "medium"
+    extraction_method: Literal["rule", "model_structured"] = "rule"
+
+    @model_validator(mode="after")
+    def validate_fact_value(self) -> ReportFact:
+        if self.value is None and not self.text_value:
+            raise ValueError("report fact requires a numeric or text value")
+        if self.value is not None and not self.unit:
+            raise ValueError("numeric report fact requires a unit")
+        if self.fact_type == "earnings_forecast" and not self.period:
+            raise ValueError("earnings forecast fact requires a period")
+        return self
 
 
 class ReportRisk(BaseModel):

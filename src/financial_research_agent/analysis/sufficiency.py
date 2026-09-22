@@ -63,8 +63,18 @@ class EvidenceSufficiencyChecker:
                     "query": None,
                     "max_events": 12,
                 }
-        if evidence_type == "research_report" and ToolName.REPORT_SEARCH in by_tool:
-            task = by_tool[ToolName.REPORT_SEARCH]
-            if int(task.arguments.get("top_k", 5)) < 10:
-                return ToolName.REPORT_SEARCH, {**task.arguments, "top_k": 10}
+        if evidence_type == "web_source" and ToolName.WEB_SEARCH in by_tool:
+            task = by_tool[ToolName.WEB_SEARCH]
+            return ToolName.WEB_SEARCH, {
+                **task.arguments,
+                "topic": "general",
+                "max_results": 12,
+            }
+        if (
+            evidence_type == "report_candidate"
+            and ToolName.REPORT_CANDIDATE_SEARCH in by_tool
+        ):
+            # The candidate tool already performs the single controlled 90 -> 180
+            # day expansion. Replanning the same search would not add evidence.
+            return None, {}
         return None, {}

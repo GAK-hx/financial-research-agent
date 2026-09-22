@@ -5,6 +5,7 @@ from typing import Protocol
 from financial_research_agent.config import Settings
 from financial_research_agent.domain.models import Evidence, QuerySpec, ResearchReport
 from financial_research_agent.reporting.context import build_report_context
+from financial_research_agent.reporting.facts import ReportFactExtractor
 
 
 class ReportProvider(Protocol):
@@ -32,7 +33,14 @@ class EvidenceOnlyReporter:
     ) -> ResearchReport:
         if not evidence:
             raise ValueError("formal report requires evidence")
-        context = build_report_context(query, evidence, self.settings.max_report_context_chars)
+        topics = query.report_request.deep_topics if query.report_request else []
+        facts = ReportFactExtractor().extract(evidence, topics=topics)
+        context = build_report_context(
+            query,
+            evidence,
+            self.settings.max_report_context_chars,
+            report_facts=facts,
+        )
         raw = await self.provider.create_report(
             question,
             context,

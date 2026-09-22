@@ -1,0 +1,51 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: financial-agent
+resources:
+  - ../base
+  - dependencies.yaml
+images:
+  - name: postgres
+    newName: financial-agent-postgres-kind
+    newTag: "17.10"
+  - name: redis
+    newName: financial-agent-redis-kind
+    newTag: "8.4"
+patches:
+  - path: kind-config-patch.yaml
+  - target: {group: apps, version: v1, kind: Deployment, name: job-api}
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+  - target: {group: apps, version: v1, kind: Deployment, name: job-worker}
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+  - target: {group: apps, version: v1, kind: Deployment, name: backend-gateway}
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+  - target: {group: autoscaling, version: v2, kind: HorizontalPodAutoscaler, name: job-api}
+    patch: |-
+      - op: replace
+        path: /spec/minReplicas
+        value: 1
+      - op: replace
+        path: /spec/maxReplicas
+        value: 2
+  - target: {group: autoscaling, version: v2, kind: HorizontalPodAutoscaler, name: backend-gateway}
+    patch: |-
+      - op: replace
+        path: /spec/minReplicas
+        value: 1
+      - op: replace
+        path: /spec/maxReplicas
+        value: 2
+  - target: {version: v1, kind: PersistentVolumeClaim, name: agent-lake}
+    patch: |-
+      - op: replace
+        path: /spec/resources/requests/storage
+        value: 2Gi

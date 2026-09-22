@@ -1,0 +1,217 @@
+[
+  {
+    "code": "current_ratio",
+    "version": "v1",
+    "name_zh": "流动比率",
+    "category": "liquidity",
+    "formula": "current_assets / current_liabilities",
+    "input_metrics": ["current_assets", "current_liabilities"],
+    "unit": "ratio",
+    "direction": "lower_is_riskier",
+    "missing_policy": "insufficient",
+    "minimum_periods": 1,
+    "thresholds": [
+      {"status": "watch", "operator": "lt", "value": 1.5},
+      {"status": "escalate", "operator": "lt", "value": 1.0}
+    ],
+    "minimum_evidence_types": ["financial_fact"],
+    "notes": "通用研究阈值；正式评测前按行业分层校准，不适用于金融机构。"
+  },
+  {
+    "code": "cash_to_short_debt",
+    "version": "v1",
+    "name_zh": "现金短债比",
+    "category": "liquidity",
+    "formula": "cash_and_equivalents / short_term_interest_bearing_debt",
+    "input_metrics": ["cash_and_equivalents", "short_term_interest_bearing_debt"],
+    "unit": "ratio",
+    "direction": "lower_is_riskier",
+    "missing_policy": "insufficient",
+    "minimum_periods": 1,
+    "thresholds": [
+      {"status": "watch", "operator": "lt", "value": 1.0},
+      {"status": "escalate", "operator": "lt", "value": 0.5}
+    ],
+    "minimum_evidence_types": ["financial_fact", "financial_note"],
+    "notes": "短期有息债务口径必须记录映射版本，不能直接以流动负债替代。"
+  },
+  {
+    "code": "ocf_to_current_liabilities",
+    "version": "v1",
+    "name_zh": "经营现金流对流动负债覆盖",
+    "category": "liquidity",
+    "formula": "annual_operating_cash_flow / current_liabilities",
+    "input_metrics": ["annual_operating_cash_flow", "current_liabilities"],
+    "unit": "ratio",
+    "direction": "lower_is_riskier",
+    "missing_policy": "insufficient",
+    "minimum_periods": 1,
+    "thresholds": [
+      {"status": "watch", "operator": "lt", "value": 0.2},
+      {"status": "escalate", "operator": "lt", "value": 0.0}
+    ],
+    "minimum_evidence_types": ["financial_fact"]
+  },
+  {
+    "code": "ocf_to_net_profit",
+    "version": "v1",
+    "name_zh": "经营现金流净利润比",
+    "category": "earnings_quality",
+    "formula": "annual_operating_cash_flow / annual_parent_net_profit",
+    "input_metrics": ["annual_operating_cash_flow", "annual_parent_net_profit"],
+    "unit": "ratio",
+    "direction": "lower_is_riskier",
+    "missing_policy": "skip_indicator",
+    "minimum_periods": 1,
+    "thresholds": [
+      {"status": "watch", "operator": "lt", "value": 0.8},
+      {"status": "escalate", "operator": "lt", "value": 0.3}
+    ],
+    "minimum_evidence_types": ["financial_fact"],
+    "notes": "净利润小于等于零时该比率不判定，转由现金流为负和亏损规则处理。"
+  },
+  {
+    "code": "accruals_to_assets",
+    "version": "v1",
+    "name_zh": "应计利润资产比",
+    "category": "earnings_quality",
+    "formula": "(annual_parent_net_profit - annual_operating_cash_flow) / average_total_assets",
+    "input_metrics": ["annual_parent_net_profit", "annual_operating_cash_flow", "average_total_assets"],
+    "unit": "ratio",
+    "direction": "higher_is_riskier",
+    "missing_policy": "insufficient",
+    "minimum_periods": 2,
+    "thresholds": [
+      {"status": "watch", "operator": "gt", "value": 0.05},
+      {"status": "escalate", "operator": "gt", "value": 0.1}
+    ],
+    "minimum_evidence_types": ["financial_fact"]
+  },
+  {
+    "code": "profit_cashflow_divergence",
+    "version": "v1",
+    "name_zh": "利润现金流连续背离",
+    "category": "earnings_quality",
+    "formula": "count(net_profit > 0 and operating_cash_flow < 0, trailing_3_periods)",
+    "input_metrics": ["parent_net_profit", "operating_cash_flow"],
+    "unit": "period_count",
+    "direction": "higher_is_riskier",
+    "missing_policy": "insufficient",
+    "minimum_periods": 3,
+    "thresholds": [
+      {"status": "watch", "operator": "ge", "value": 2.0},
+      {"status": "escalate", "operator": "ge", "value": 3.0}
+    ],
+    "minimum_evidence_types": ["financial_fact"]
+  },
+  {
+    "code": "receivables_revenue_growth_gap",
+    "version": "v1",
+    "name_zh": "应收增速与收入增速差",
+    "category": "asset_quality",
+    "formula": "receivables_yoy - revenue_yoy",
+    "input_metrics": ["receivables_yoy", "revenue_yoy"],
+    "unit": "percentage_point",
+    "direction": "higher_is_riskier",
+    "missing_policy": "insufficient",
+    "minimum_periods": 2,
+    "thresholds": [
+      {"status": "watch", "operator": "gt", "value": 0.15},
+      {"status": "escalate", "operator": "gt", "value": 0.3}
+    ],
+    "minimum_evidence_types": ["financial_fact"]
+  },
+  {
+    "code": "inventory_revenue_growth_gap",
+    "version": "v1",
+    "name_zh": "存货增速与收入增速差",
+    "category": "asset_quality",
+    "formula": "inventory_yoy - revenue_yoy",
+    "input_metrics": ["inventory_yoy", "revenue_yoy"],
+    "unit": "percentage_point",
+    "direction": "higher_is_riskier",
+    "missing_policy": "insufficient",
+    "minimum_periods": 2,
+    "thresholds": [
+      {"status": "watch", "operator": "gt", "value": 0.15},
+      {"status": "escalate", "operator": "gt", "value": 0.3}
+    ],
+    "minimum_evidence_types": ["financial_fact"]
+  },
+  {
+    "code": "goodwill_to_assets",
+    "version": "v1",
+    "name_zh": "商誉资产比",
+    "category": "asset_quality",
+    "formula": "goodwill / total_assets",
+    "input_metrics": ["goodwill", "total_assets"],
+    "unit": "ratio",
+    "direction": "higher_is_riskier",
+    "missing_policy": "insufficient",
+    "minimum_periods": 1,
+    "thresholds": [
+      {"status": "watch", "operator": "gt", "value": 0.1},
+      {"status": "escalate", "operator": "gt", "value": 0.2}
+    ],
+    "minimum_evidence_types": ["financial_fact", "financial_note"]
+  },
+  {
+    "code": "impairment_to_assets",
+    "version": "v1",
+    "name_zh": "减值损失资产比",
+    "category": "asset_quality",
+    "formula": "annual_impairment_loss / average_total_assets",
+    "input_metrics": ["annual_impairment_loss", "average_total_assets"],
+    "unit": "ratio",
+    "direction": "higher_is_riskier",
+    "missing_policy": "insufficient",
+    "minimum_periods": 2,
+    "thresholds": [
+      {"status": "watch", "operator": "gt", "value": 0.02},
+      {"status": "escalate", "operator": "gt", "value": 0.05}
+    ],
+    "minimum_evidence_types": ["financial_fact", "financial_note"]
+  },
+  {
+    "code": "nonstandard_audit_opinion",
+    "version": "v1",
+    "name_zh": "非标准审计意见",
+    "category": "disclosure_audit",
+    "formula": "audit_opinion in qualified_or_worse",
+    "input_metrics": ["audit_opinion_flag"],
+    "unit": "boolean",
+    "direction": "boolean_flag",
+    "missing_policy": "explicit_false_only",
+    "minimum_periods": 1,
+    "thresholds": [{"status": "escalate", "operator": "eq", "value": 1.0}],
+    "minimum_evidence_types": ["audit_report"]
+  },
+  {
+    "code": "financial_restatement",
+    "version": "v1",
+    "name_zh": "财务差错更正或重大修订",
+    "category": "disclosure_audit",
+    "formula": "restatement_event_flag",
+    "input_metrics": ["restatement_event_flag"],
+    "unit": "boolean",
+    "direction": "boolean_flag",
+    "missing_policy": "explicit_false_only",
+    "minimum_periods": 1,
+    "thresholds": [{"status": "escalate", "operator": "eq", "value": 1.0}],
+    "minimum_evidence_types": ["company_disclosure"]
+  },
+  {
+    "code": "financial_regulatory_inquiry",
+    "version": "v1",
+    "name_zh": "财务披露监管问询",
+    "category": "disclosure_audit",
+    "formula": "financial_inquiry_event_flag",
+    "input_metrics": ["financial_inquiry_event_flag"],
+    "unit": "boolean",
+    "direction": "boolean_flag",
+    "missing_policy": "explicit_false_only",
+    "minimum_periods": 1,
+    "thresholds": [{"status": "watch", "operator": "eq", "value": 1.0}],
+    "minimum_evidence_types": ["regulatory_disclosure"]
+  }
+]

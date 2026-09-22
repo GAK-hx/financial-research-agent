@@ -86,6 +86,7 @@ class SkillRegistry:
                     ToolName(name) for name in sorted(available_tools)
                 ],
             )
+            selection = self._apply_report_requirements(selection, query)
             return selection.model_copy(
                 update={"report_profiles": self._profiles_for(query)}
             )
@@ -117,9 +118,11 @@ class SkillRegistry:
                     else "financial"
                 ] = 1
             if "report" in query.analysis_domains:
-                requirements["research_report"] = 1
+                requirements["report_candidate"] = 1
+                if query.report_request and query.report_request.mode == "deep":
+                    requirements["research_report"] = 1
             if "event" in query.analysis_domains:
-                requirements["event"] = 1
+                requirements["web_source"] = 1
             if "factor" in query.analysis_domains:
                 requirements["factor"] = 1
             selection = selection.model_copy(
@@ -133,9 +136,49 @@ class SkillRegistry:
                     ]
                 }
             )
+        selection = self._apply_report_requirements(selection, query)
+        if query.intent.value == "event":
+            effective = list(selection.effective_allowed_tools)
+            if ToolName.WEB_SEARCH in effective:
+                effective = [
+                    item for item in effective if item != ToolName.EVENT_SEARCH
+                ]
+                requirement = "web_source"
+            else:
+                requirement = "event"
+            selection = selection.model_copy(
+                update={
+                    "effective_allowed_tools": effective,
+                    "required_evidence": [
+                        EvidenceRequirement(
+                            evidence_type=requirement, minimum_count=1
+                        )
+                    ],
+                }
+            )
         return selection.model_copy(
             update={"report_profiles": self._profiles_for(query)}
         )
+
+    @staticmethod
+    def _apply_report_requirements(
+        selection: SkillSelection, query: QuerySpec
+    ) -> SkillSelection:
+        if "report" not in query.analysis_domains:
+            return selection
+        requirements = [
+            item
+            for item in selection.required_evidence
+            if item.evidence_type not in {"report_candidate", "research_report"}
+        ]
+        requirements.append(
+            EvidenceRequirement(evidence_type="report_candidate", minimum_count=1)
+        )
+        if query.report_request and query.report_request.mode == "deep":
+            requirements.append(
+                EvidenceRequirement(evidence_type="research_report", minimum_count=1)
+            )
+        return selection.model_copy(update={"required_evidence": requirements})
 
     def _profiles_for(self, query: QuerySpec) -> list[ReportProfile]:
         requested = [name for name in ("concise", "risk") if name in query.dimensions]

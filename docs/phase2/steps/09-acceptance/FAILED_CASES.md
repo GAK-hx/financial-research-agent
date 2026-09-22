@@ -8,7 +8,7 @@
 
 ```text
 Cannot connect to the Docker daemon at
-unix:///Users/fangzhijian/.docker/run/docker.sock.
+unix:///Users/<local-user>/.docker/run/docker.sock.
 Is the docker daemon running?
 ```
 
@@ -20,4 +20,3 @@ Is the docker daemon running?
 4. 备份、临时恢复、同步Run和异步Job随后全部通过。
 
 该事件未修改项目数据，也未被计为业务测试通过。
-

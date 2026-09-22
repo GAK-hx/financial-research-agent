@@ -1,0 +1,12 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: financial-agent
+resources:
+  - platform.yaml
+  - workloads.yaml
+  - scaling-security.yaml
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: financial-risk-agent
+    includeSelectors: false
+    includeTemplates: true

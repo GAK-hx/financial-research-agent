@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from financial_research_agent.domain.models import Evidence, QuerySpec
+from financial_research_agent.domain.models import Evidence, QuerySpec, ReportFact
 from financial_research_agent.memory.models import (
     BuiltContext,
     ContextItemRef,
@@ -322,7 +322,12 @@ class ContextBuilder:
         draft: dict[str, Any] | None = None,
         validation_errors: list[str] | None = None,
         knowledge: list[dict[str, Any]] | None = None,
+        report_facts: list[ReportFact] | None = None,
+        report_workflow: dict[str, Any] | None = None,
     ) -> BuiltContext:
+        evidence = self._report_evidence_scope(
+            query, evidence, report_workflow=report_workflow
+        )
         original = [
             evidence_context_item(item, compact_bulk_rows=False)
             for item in evidence
@@ -358,6 +363,12 @@ class ContextBuilder:
                 item.model_dump(mode="json") for item in selection.report_profiles
             ],
         }
+        if report_workflow is not None:
+            payload["report_workflow"] = report_workflow
+        if report_facts:
+            payload["report_facts"] = [
+                item.model_dump(mode="json") for item in report_facts
+            ]
         if draft is not None:
             payload["draft"] = draft
         if validation_errors:
@@ -374,7 +385,80 @@ class ContextBuilder:
                     "evidence": original,
                 }
             ),
+            extra_warnings=self._report_manifest_warnings(report_workflow),
         )
+
+    @staticmethod
+    def _report_evidence_scope(
+        query: QuerySpec,
+        evidence: list[Evidence],
+        *,
+        report_workflow: dict[str, Any] | None,
+    ) -> list[Evidence]:
+        request = query.report_request
+        if request is None:
+            return evidence
+        non_report = [
+            item
+            for item in evidence
+            if item.evidence_type not in {"report_candidate", "research_report"}
+        ]
+        if request.mode == "candidate_only":
+            report_items = [
+                item for item in evidence if item.evidence_type == "report_candidate"
+            ][: request.candidate_top_k]
+            return [*non_report, *report_items]
+        selected_documents = set(
+            (report_workflow or {}).get("selected_document_ids") or []
+        )
+        seen_chunks: set[tuple[str, str]] = set()
+        report_items: list[Evidence] = []
+        for item in evidence:
+            if item.evidence_type != "research_report":
+                continue
+            document_id = str(
+                item.data.get("document_id")
+                or item.source.metadata.get("document_id")
+                or ""
+            )
+            if selected_documents and document_id not in selected_documents:
+                continue
+            parent_id = str(
+                item.data.get("parent_chunk_id")
+                or item.data.get("chunk_id")
+                or item.evidence_id
+            )
+            identity = (document_id, parent_id)
+            if identity in seen_chunks:
+                continue
+            seen_chunks.add(identity)
+            report_items.append(item)
+        return [*non_report, *report_items]
+
+    @staticmethod
+    def _report_manifest_warnings(
+        report_workflow: dict[str, Any] | None,
+    ) -> list[str]:
+        if not report_workflow:
+            return []
+        warnings = [
+            "REPORT_VALIDATION_PROFILE:"
+            + str(report_workflow.get("validation_profile") or "unknown")
+        ]
+        candidate_set_id = report_workflow.get("candidate_set_id")
+        if candidate_set_id:
+            warnings.append(f"REPORT_CANDIDATE_SET:{candidate_set_id}")
+        selected = report_workflow.get("selected_candidate_ids") or []
+        if selected:
+            warnings.append("REPORT_SELECTED_CANDIDATES:" + ",".join(selected))
+        if report_workflow.get("window_expanded"):
+            warnings.append("REPORT_WINDOW_EXPANDED:90_TO_180_DAYS")
+        unknown_dates = report_workflow.get("unknown_date_candidate_ids") or []
+        if unknown_dates:
+            warnings.append(
+                "REPORT_UNKNOWN_DATES_INCLUDED:" + ",".join(unknown_dates)
+            )
+        return warnings
 
     async def _finalize(
         self,
@@ -385,6 +469,7 @@ class ContextBuilder:
         skill_versions: list[str],
         evidence_hash: str | None = None,
         token_estimate_before_override: int | None = None,
+        extra_warnings: list[str] | None = None,
     ) -> BuiltContext:
         policy = self.policies[node_name]
         before = token_estimate_before_override or estimate_tokens(payload)
@@ -396,6 +481,7 @@ class ContextBuilder:
         warnings: list[str] = [
             f"OUTPUT_TOKENS_RESERVED:{policy.reserved_output_tokens}"
         ]
+        warnings.extend(extra_warnings or [])
         after = estimate_tokens(candidate)
         input_limit = max(256, policy.max_input_tokens - policy.reserved_output_tokens)
         can_summarize_memory = (
@@ -609,6 +695,8 @@ class ContextBuilder:
             "question": 100,
             "query": 100,
             "evidence": 100,
+            "report_facts": 100,
+            "report_workflow": 100,
             "validation_errors": 100,
             "draft": 90,
             "tool_schemas": 80,

@@ -38,7 +38,8 @@ class RulePlanner:
         elif query.intent == Intent.FACTOR:
             tasks.append(AnalysisTask(task_id="factor", tool_name=ToolName.FACTOR_SCREEN, arguments={"stock_codes": query.stock_codes}))
         elif query.intent == Intent.EVENT:
-            tasks.append(AnalysisTask(task_id="event", tool_name=ToolName.EVENT_SEARCH, arguments={"stock_code": stock_code, "query": question[:200] or None}))
+            for code in query.stock_codes:
+                tasks.append(AnalysisTask(task_id=f"web_{code}", tool_name=ToolName.WEB_SEARCH, arguments={"stock_code": code, "query": question[:300] or code}))
         elif query.intent == Intent.COMPREHENSIVE:
             if "market" in domains:
                 if "technical_analysis" in query.dimensions:
@@ -51,9 +52,10 @@ class RulePlanner:
                 else:
                     self._append_legacy_tasks(tasks, query, question, {"financial"}, stock_code)
             if "report" in domains:
-                tasks.append(AnalysisTask(task_id="report", tool_name=ToolName.REPORT_SEARCH, arguments={"stock_code": stock_code, "query": question or stock_code}))
+                tasks.append(AnalysisTask(task_id="report_candidates", tool_name=ToolName.REPORT_CANDIDATE_SEARCH, arguments={"stock_code": stock_code, "query": question or stock_code}))
             if "event" in domains:
-                tasks.append(AnalysisTask(task_id="event", tool_name=ToolName.EVENT_SEARCH, arguments={"stock_code": stock_code, "query": question[:200] or None}))
+                for code in query.stock_codes:
+                    tasks.append(AnalysisTask(task_id=f"web_{code}", tool_name=ToolName.WEB_SEARCH, arguments={"stock_code": code, "query": question[:300] or code}))
             if "factor" in domains:
                 tasks.append(AnalysisTask(task_id="factor", tool_name=ToolName.FACTOR_SCREEN, arguments={"stock_codes": query.stock_codes}))
         else:
@@ -95,8 +97,8 @@ class RulePlanner:
         if "report" in domains:
             tasks.append(
                 AnalysisTask(
-                    task_id="report",
-                    tool_name=ToolName.REPORT_SEARCH,
+                    task_id="report_candidates",
+                    tool_name=ToolName.REPORT_CANDIDATE_SEARCH,
                     arguments={"stock_code": stock_code, "query": question or stock_code},
                 )
             )

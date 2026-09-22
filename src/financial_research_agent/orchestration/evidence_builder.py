@@ -42,11 +42,13 @@ class EvidenceBuilder:
             "market": "iceberg",
             "financial": "iceberg",
             "indicator": "calculation",
+            "report_candidate": "milvus",
             "research_report": "milvus",
             "technical": "calculation",
             "fundamental": "calculation",
             "factor": "iceberg",
             "event": "knowledge",
+            "web_source": "knowledge",
             "comparison": "calculation",
         }[item.evidence_type]
         if item.source.source_type != expected_source or not item.source.locator:
@@ -60,6 +62,10 @@ class EvidenceBuilder:
             required = ("institution", "report_title", "page_number", "chunk_id")
             if any(not item.data.get(field) for field in required):
                 raise ValueError("research report evidence lacks attribution or page chain")
+        if item.evidence_type == "report_candidate":
+            required = ("candidate_id", "document_id", "institution", "report_title")
+            if any(not item.data.get(field) for field in required):
+                raise ValueError("report candidate evidence lacks document attribution")
         if item.evidence_type == "factor":
             required = ("registry_version", "universe_version", "run_id")
             if any(not item.source.metadata.get(field) for field in required):
@@ -68,3 +74,9 @@ class EvidenceBuilder:
             required = ("event_id", "source_url", "available_at", "status")
             if any(not item.source.metadata.get(field) for field in required):
                 raise ValueError("event evidence lacks activation or source lineage")
+        if item.evidence_type == "web_source":
+            required = ("es_document_id", "domain", "fetched_at", "content_hash")
+            if any(not item.source.metadata.get(field) for field in required):
+                raise ValueError("web evidence lacks URL, fetch time or content lineage")
+            if not item.source.locator.startswith(("https://", "http://")):
+                raise ValueError("web evidence requires a canonical HTTP URL")

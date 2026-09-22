@@ -24,7 +24,11 @@ class PlanExecutor:
                 async with self.semaphore:
                     async with asyncio.timeout(tool.definition.timeout_seconds):
                         result = await tool.execute(task.task_id, validated)
-                transient = result.error_code in {"SOURCE_UNAVAILABLE", "REPORT_SEARCH_UNAVAILABLE"}
+                transient = result.error_code in {
+                    "SOURCE_UNAVAILABLE",
+                    "REPORT_SEARCH_UNAVAILABLE",
+                    "REPORT_CONTENT_UNAVAILABLE",
+                }
                 if result.success or not transient or attempt == self.max_retries:
                     return result
             except TimeoutError:

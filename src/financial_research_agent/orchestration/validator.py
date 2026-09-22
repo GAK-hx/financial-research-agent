@@ -91,13 +91,13 @@ class PlanValidator:
             Intent.TECHNICAL: {ToolName.TECHNICAL_ANALYSIS},
             Intent.FINANCIAL: {ToolName.FINANCIAL_QUERY},
             Intent.FUNDAMENTAL: {ToolName.FUNDAMENTAL_ANALYSIS},
-            Intent.REPORT: {ToolName.REPORT_SEARCH},
-            Intent.EVENT: {ToolName.EVENT_SEARCH},
+            Intent.REPORT: {ToolName.REPORT_CANDIDATE_SEARCH},
+            Intent.EVENT: {ToolName.WEB_SEARCH},
             Intent.SCREENING: {ToolName.STOCK_COMPARISON},
             Intent.FACTOR: {ToolName.FACTOR_SCREEN},
             Intent.COMPREHENSIVE: {
                 ToolName.TECHNICAL_ANALYSIS,
-                ToolName.REPORT_SEARCH,
+                ToolName.REPORT_CANDIDATE_SEARCH,
             },
         }[intent]
 
@@ -122,9 +122,9 @@ class PlanValidator:
                 else ToolName.FINANCIAL_QUERY
             )
         if "report" in query.analysis_domains:
-            tools.add(ToolName.REPORT_SEARCH)
+            tools.add(ToolName.REPORT_CANDIDATE_SEARCH)
         if "event" in query.analysis_domains:
-            tools.add(ToolName.EVENT_SEARCH)
+            tools.add(ToolName.WEB_SEARCH)
         if "factor" in query.analysis_domains:
             tools.add(ToolName.FACTOR_SCREEN)
         return tools
@@ -155,6 +155,7 @@ class PlanValidator:
                 ToolName.FUNDAMENTAL_ANALYSIS,
                 ToolName.STOCK_COMPARISON,
                 ToolName.EVENT_SEARCH,
+                ToolName.WEB_SEARCH,
             }:
                 arguments["start_date"] = plan.query.start_date
                 arguments["end_date"] = plan.query.end_date
@@ -164,12 +165,43 @@ class PlanValidator:
                 ToolName.TECHNICAL_ANALYSIS,
             }:
                 arguments["adjust_type"] = "qfq"
-            if task.tool_name == ToolName.REPORT_SEARCH:
+            if task.tool_name == ToolName.REPORT_CANDIDATE_SEARCH:
                 arguments["query"] = question
-                arguments["top_k"] = 5
+                request = plan.query.report_request
+                if request is None:
+                    raise ValueError("report plan lacks report request")
+                arguments.update(
+                    {
+                        "reference_date": request.end_date,
+                        "top_k": request.candidate_top_k,
+                        "minimum_candidates": request.minimum_candidates,
+                        "explicit_date_range": request.explicit_date_range,
+                        "start_date": request.start_date,
+                        "end_date": request.end_date,
+                        "institution": (
+                            request.institution_filters[0]
+                            if request.institution_filters
+                            else None
+                        ),
+                        "title_keywords": request.title_keywords,
+                        "allow_unknown_date": request.allow_unknown_date,
+                    }
+                )
             if task.tool_name == ToolName.EVENT_SEARCH:
                 arguments["query"] = question[:200]
                 arguments["max_events"] = 8
+            if task.tool_name == ToolName.WEB_SEARCH:
+                labels = ["公开公告", "新闻", "经营进展"]
+                if "risk" in plan.query.dimensions:
+                    labels.append("风险")
+                if any(
+                    item in plan.query.dimensions
+                    for item in ("financial_growth", "profitability", "leverage")
+                ):
+                    labels.append("财务业绩")
+                arguments["query"] = " ".join(labels)
+                arguments["max_results"] = 8
+                arguments["topic"] = "news"
             if task.tool_name == ToolName.FACTOR_SCREEN:
                 arguments["stock_codes"] = plan.query.stock_codes
                 arguments["as_of_date"] = plan.query.end_date

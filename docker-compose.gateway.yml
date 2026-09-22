@@ -1,0 +1,11 @@
+services:
+  app:
+    ports: !reset []
+  job-api:
+    ports: !reset []
+  elasticsearch:
+    ports: !reset []
+  redis:
+    ports: !reset []
+  milvus:
+    ports: !reset []
