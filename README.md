@@ -14,16 +14,29 @@ Morshan 是一个面向企业财务风险监测与证据复核的只读 Agent �
 
 系统集中处理四类紧密关联的风险：
 
-1. 偿债与流动性；
-2. 盈利质量与现金流；
-3. 资产质量与减值；
-4. 财务披露与审计异常。
+1. 偿债与流动性：短期债务覆盖、现金储备、杠杆变化和流动性压力；
+2. 盈利质量与现金流：利润与经营现金流背离、毛利率变化和非经常性损益；
+3. 资产质量与减值：应收、存货、商誉及其他高风险资产的异常变化；
+4. 财务披露与审计异常：审计意见、业绩预告修正、问询函和重大会计调整。
 
 行情、因子、公告、新闻和研报只作为辅助证据。系统不执行交易、不生成下单指令、不支持分钟级实时行情，
 也不把模型生成文本直接写成可信长期事实。
 
 输出的 `RiskAssessmentArtifact` 绑定主体、报告期、分析截止日、数据快照、风险状态、支持与反向证据、
 计算口径、缺失数据和替代解释。证据不足时返回 `INSUFFICIENT_DATA`，不会把缺失值填成零或强行生成结论。
+
+| 输入 | 说明 |
+|---|---|
+| 公司与报告期 | 支持单公司风险复核，也可从批量候选中选择公司 |
+| 分析截止日 | 决定本次运行允许读取的信息边界 |
+| 研究问题 | 指定风险方向、时间范围和需要比较的指标 |
+
+| 输出 | 内容 |
+|---|---|
+| 风险状态 | 风险成立、风险较弱、证据冲突或数据不足 |
+| 证据链 | 支持证据、反向证据、来源、日期、页码或数据快照 |
+| 计算与限制 | 指标公式、单位、缺失数据、替代解释和适用边界 |
+| 用户报告 | 基于公共分析产物生成，保留租户与会话隔离 |
 
 ## 系统架构
 
@@ -63,6 +76,19 @@ Spring与Redis不是Agent逻辑的必要运行前提。开发环境可以直接�
 限流和身份头清洗，Python负责Agent、Tool和报告逻辑。PostgreSQL始终是任务、租约和终态的事实来源，
 Redis故障不会删除已经完成的任务或报告。
 
+### 组件职责
+
+| 组件 | 技术 | 主要职责 |
+|---|---|---|
+| 外部入口 | Java 21、Spring Boot、WebFlux | API Key/JWT认证、身份头清洗、Redis限流与SSE代理 |
+| 任务API | FastAPI、Pydantic | 创建、查询、取消和恢复任务，提供Trace与事件接口 |
+| Agent运行时 | LangChain、LangGraph | 模型与Tool接口、状态图、条件路由、并行执行与Checkpoint |
+| 受控执行 | Harness、Policy、Budget Ledger | 参数校验、权限、预算、超时、重试和终态控制 |
+| 数据平台 | PyArrow、PyIceberg、Spark | 标准化、PIT特征、Snapshot、批处理和增量计算 |
+| 文档检索 | PyMuPDF、Milvus、Elasticsearch | 研报解析、混合召回和网络内容版本管理 |
+| 可靠存储 | PostgreSQL | Job、租约、事件、Checkpoint、Memory和分析事实 |
+| 热状态 | Redis | 限流、并发槽位、single-flight索引和事件通知 |
+
 ## 核心组件
 
 ### 数据湖与 Point-in-Time 数据
@@ -80,6 +106,21 @@ Redis故障不会删除已经完成的任务或报告。
 - Harness限制Tool白名单、参数、预算、超时、重试、取消和终态写入；
 - Policy Engine与Budget Ledger限制模型调用、Tool尝试、Evidence数量和报告修订次数；
 - 动态多Agent不是全局默认，只在公开Benchmark证明有增量的题型启用。
+
+一次分析的主要状态流为：
+
+```text
+QuerySpec
+  → TeamPlan
+  → ToolCalls
+  → Evidence
+  → SubAgentEvaluation
+  → RiskAssessmentArtifact
+  → ValidationResult
+```
+
+网络超时可以按退避策略重试；已经返回但结构不合法的模型结果不会原样反复调用，而是保留错误信息并最多
+执行一次定向修复。任务取消、预算耗尽和证据不足都有明确终态。
 
 ### Skill、Tool 与 Evidence
 
@@ -182,6 +223,15 @@ docker compose --profile harness --profile concurrency --profile gateway \
 
 FastAPI开发入口为`http://localhost:8002`，Gateway入口为`http://localhost:8080/api/v1`。
 
+服务启动后可以先检查：
+
+```bash
+curl http://localhost:8002/health
+curl http://localhost:8002/tools
+```
+
+开发环境可以直接访问FastAPI；启用Gateway后，外部请求应统一经过`8080`端口完成认证、限流和身份注入。
+
 仅暴露Gateway的端口边界：
 
 ```bash
@@ -226,6 +276,18 @@ docker compose --profile rag run --rm rag-index \
 
 默认研报目录`./data/reports`以只读方式挂载；其他本机资料路径只能写在未提交的`.env`中。
 
+### 本地验证
+
+```bash
+bash scripts/secret_scan.sh
+.venv/bin/ruff check src tests scripts
+IDENTITY_MODE=local AGENT_API_KEY='' PYTHONPATH=src \
+  .venv/bin/python -m unittest discover -s tests -q
+docker compose config --quiet
+```
+
+模型API、PostgreSQL、Redis和Kubernetes集成测试按需单独运行，不放进默认离线单元测试。
+
 ## Kubernetes
 
 `deploy/k8s/base`提供通用Kustomize Base，`deploy/k8s/kind`提供本地三逻辑节点Overlay。包含：
@@ -236,7 +298,18 @@ docker compose --profile rag run --rm rag-index \
 - 非root、只读根文件系统、最小Linux capability与独立ServiceAccount；
 - Secret与ConfigMap边界，以及共享湖PVC。
 
-本地与Kubernetes运行方式见[快速使用](docs/GETTING_STARTED.md)。
+使用Kind创建本地集群后，先在目标Namespace创建`financial-agent-secrets`，再部署Overlay：
+
+```bash
+kubectl apply -k deploy/k8s/kind
+kubectl -n financial-agent wait --for=condition=complete job/db-migrate --timeout=300s
+kubectl -n financial-agent rollout status deployment/job-api --timeout=300s
+kubectl -n financial-agent rollout status deployment/job-worker --timeout=300s
+kubectl -n financial-agent rollout status deployment/backend-gateway --timeout=300s
+```
+
+本地Kind节点共享一台机器，适合验证清单、资源限制和故障恢复流程；生产部署需要替换为对象存储、共享
+Catalog、托管PostgreSQL/Redis、外部Secret Manager、Ingress/TLS和多可用区资源。
 
 ## 项目结构
 
@@ -268,12 +341,6 @@ financial-research-agent/
 ├── docker-compose.yml
 └── docker-compose.gateway.yml
 ```
-
-## 文档入口
-
-- [功能说明](docs/FEATURES.md)
-- [快速使用](docs/GETTING_STARTED.md)
-- [组件架构](docs/ARCHITECTURE.md)
 
 ## 使用边界
 
