@@ -284,15 +284,10 @@ financial-research-agent/
 - [代码组织与演进](docs/development/code-organization.md)
 - [GitHub SSH与配置安全](docs/security/SSH_SETUP.md)
 
-## 已知限制
+## 使用边界
 
-- 财务数据源仍需持续改善首次披露时间、修订版本和事件覆盖；
-- 网络检索只有配置合法Provider后才启用，未配置时明确返回不可用；
-- Context Builder管理输入内容和Token预算，但不直接控制第三方模型服务端KV Cache；
-- MCP目前只保留Tool Schema兼容边界，没有实现独立MCP Server；
-- 本地Kind三节点共享一台Mac；HPA未在metrics-server下做动态扩缩容验证；
-- 本地RWO湖PVC、PostgreSQL和Redis不能直接作为云上生产存储方案；
-- Kubernetes CronJob目前只验证湖命名空间初始化，尚未接入完整定时增量采集；
-- 镜像漏洞与SBOM检查、云上容量测试和多可用区部署仍属于生产化工作。
+- 当前版本面向日线、财务和中长期风险分析，不提供实时行情或交易能力；
+- 分析质量仍受公开数据源的披露时间、修订记录和事件覆盖影响；
+- Docker Compose与本地Kind用于复现和工程验证，云上高可用与容量规划需结合实际环境完成。
 
 公开仓库只包含空配置模板、可复现代码和公开数据集评测说明；个人密钥、本机配置和私有数据不进入版本库。
